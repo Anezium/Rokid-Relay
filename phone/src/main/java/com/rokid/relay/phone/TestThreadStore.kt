@@ -1,6 +1,7 @@
 package com.rokid.relay.phone
 
 import android.content.Context
+import android.content.SharedPreferences
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -12,9 +13,7 @@ internal object TestThreadStore {
     private const val PREF_THREAD_PREFIX = "test_thread_messages_"
 
     fun nextThreadIndex(context: Context): Int =
-        prefs(context)
-            .getInt(PREF_NEXT_THREAD_INDEX, 1)
-            .coerceIn(1, MAX_THREAD_INDEX)
+        syncNextThreadIndex(prefs(context))
 
     fun load(context: Context, threadIndex: Int): List<TestThreadMessage> {
         val raw = prefs(context).getString(threadHistoryKey(threadIndex), null) ?: return emptyList()
@@ -65,17 +64,27 @@ internal object TestThreadStore {
     }
 
     fun clear(context: Context, threadIndex: Int) {
-        prefs(context)
+        val store = prefs(context)
+        store
             .edit()
             .remove(threadHistoryKey(normalizeThreadIndex(threadIndex)))
             .apply()
+        syncNextThreadIndex(store)
+    }
+
+    fun clearAll(context: Context): List<Int> {
+        val store = prefs(context)
+        val clearedThreads = savedThreadIndices(store)
+        val editor = store.edit()
+        store.all.keys
+            .filter { key -> key == PREF_NEXT_THREAD_INDEX || key.startsWith(PREF_THREAD_PREFIX) }
+            .forEach { key -> editor.remove(key) }
+        editor.putInt(PREF_NEXT_THREAD_INDEX, 1).apply()
+        return clearedThreads
     }
 
     fun updateNextThreadIndex(context: Context, candidate: Int) {
-        val store = prefs(context)
-        val next = maxOf(store.getInt(PREF_NEXT_THREAD_INDEX, 1), candidate)
-            .coerceIn(1, MAX_THREAD_INDEX)
-        store.edit().putInt(PREF_NEXT_THREAD_INDEX, next).apply()
+        syncNextThreadIndex(prefs(context), candidate)
     }
 
     fun normalizeThreadIndex(threadIndex: Int): Int =
@@ -83,6 +92,29 @@ internal object TestThreadStore {
 
     private fun prefs(context: Context) =
         context.applicationContext.getSharedPreferences(Constants.PREFS, Context.MODE_PRIVATE)
+
+    private fun syncNextThreadIndex(store: SharedPreferences, preferredStart: Int = 1): Int {
+        val occupiedThreads = savedThreadIndices(store).toSet()
+        val start = preferredStart.coerceIn(1, MAX_THREAD_INDEX)
+        val next = firstFreeThreadIndex(occupiedThreads, start)
+            ?: firstFreeThreadIndex(occupiedThreads, 1)
+            ?: MAX_THREAD_INDEX
+        store.edit().putInt(PREF_NEXT_THREAD_INDEX, next).apply()
+        return next
+    }
+
+    private fun savedThreadIndices(store: SharedPreferences): List<Int> =
+        store.all.keys
+            .asSequence()
+            .filter { key -> key.startsWith(PREF_THREAD_PREFIX) }
+            .mapNotNull { key -> key.removePrefix(PREF_THREAD_PREFIX).toIntOrNull() }
+            .map { index -> normalizeThreadIndex(index) }
+            .distinct()
+            .sorted()
+            .toList()
+
+    private fun firstFreeThreadIndex(occupiedThreads: Set<Int>, start: Int): Int? =
+        (start..MAX_THREAD_INDEX).firstOrNull { index -> index !in occupiedThreads }
 
     private fun threadHistoryKey(threadIndex: Int): String =
         "$PREF_THREAD_PREFIX${normalizeThreadIndex(threadIndex)}"

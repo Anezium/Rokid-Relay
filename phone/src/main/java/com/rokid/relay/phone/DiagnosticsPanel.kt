@@ -75,6 +75,11 @@ class DiagnosticsPanel(
             smallButton("Clear thread", ButtonTone.Danger) {
                 clearThread()
             },
+            smallButton("Clear all", ButtonTone.Danger) {
+                clearAllThreads()
+            },
+        ), matchWrap(top = 8))
+        container.addView(buttonRow(
             smallButton("Single test", ButtonTone.Secondary) {
                 TestNotificationHarness.postTestNotification(context)
                 onStatusChanged()
@@ -152,8 +157,16 @@ class DiagnosticsPanel(
     private fun clearThread() {
         val threadIndex = readThreadIndex() ?: return
         TestNotificationHarness.clearTestThread(context, threadIndex)
+        threadInput.setText(TestNotificationHarness.nextThreadIndex(context).toString())
         onStatusChanged()
         onNotice("Test thread $threadIndex cleared")
+    }
+
+    private fun clearAllThreads() {
+        TestNotificationHarness.clearAllTestThreads(context)
+        threadInput.setText(TestNotificationHarness.nextThreadIndex(context).toString())
+        onStatusChanged()
+        onNotice("All test threads cleared. The next thread will start at 1.")
     }
 
     private fun readThreadIndex(): Int? {

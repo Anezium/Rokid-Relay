@@ -53,6 +53,10 @@ class TestNotificationReceiver : BroadcastReceiver() {
             TestNotificationHarness.clearTestThread(context, threadIndex)
         }
 
+        fun clearAllTestThreads(context: Context) {
+            TestNotificationHarness.clearAllTestThreads(context)
+        }
+
         fun postBurstTestNotification(
             context: Context,
             notificationId: Int = Constants.TEST_NOTIFICATION_ID,

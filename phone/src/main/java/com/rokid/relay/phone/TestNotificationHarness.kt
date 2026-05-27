@@ -111,6 +111,17 @@ object TestNotificationHarness {
         RelayBridge.setStatus("test thread $normalizedThread cleared")
     }
 
+    fun clearAllTestThreads(context: Context) {
+        val appContext = context.applicationContext
+        val clearedThreads = TestThreadStore.clearAll(appContext)
+        clearedThreads.forEach { threadIndex ->
+            TestNotificationPoster.cancel(appContext, notificationIdForThread(threadIndex))
+        }
+        TestNotificationPoster.cancel(appContext, Constants.TEST_NOTIFICATION_ID)
+        TestNotificationPoster.cancel(appContext, Constants.TEST_NOTIFICATION_SECOND_THREAD_ID)
+        RelayBridge.setStatus("all test threads cleared")
+    }
+
     fun postBurstTestNotification(
         context: Context,
         notificationId: Int = Constants.TEST_NOTIFICATION_ID,
