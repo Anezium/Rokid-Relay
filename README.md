@@ -5,8 +5,22 @@
 <h1 align="center">Rokid Relay</h1>
 
 <p align="center">
+  <a href="#requirements"><img alt="Android 12+" src="https://img.shields.io/badge/Android-12%2B-3DDC84?logo=android&logoColor=white"></a>
+  <a href="#project-structure"><img alt="Kotlin" src="https://img.shields.io/badge/Kotlin-2.2-7F52FF?logo=kotlin&logoColor=white"></a>
+  <a href="#how-it-works"><img alt="Rokid CXR-L and CXR-S" src="https://img.shields.io/badge/Rokid-CXR--L%20%2B%20CXR--S-00A86B"></a>
+  <a href="#speech-setup"><img alt="OpenAI and ElevenLabs STT" src="https://img.shields.io/badge/STT-OpenAI%20%2B%20ElevenLabs-111827"></a>
+  <a href="#status"><img alt="Development preview" src="https://img.shields.io/badge/status-development%20preview-f59e0b"></a>
+</p>
+
+<p align="center">
   Reply to Android phone notifications from Rokid glasses with a tiny glasses overlay,
   the glasses microphone, CXR-L through Hi Rokid, and Android direct reply.
+</p>
+
+<p align="center">
+  <a href="https://ko-fi.com/M8R61ZTXMI" target="_blank">
+    <img height="36" style="border:0px;height:36px;" src="https://storage.ko-fi.com/cdn/kofi4.png?v=6" border="0" alt="Buy Me a Coffee at ko-fi.com" />
+  </a>
 </p>
 
 ---
