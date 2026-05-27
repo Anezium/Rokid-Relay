@@ -136,8 +136,20 @@ object RelayBridge {
             .put("title", reply.title)
             .put("text", reply.text)
             .put("canReply", true)
+            .appendUserSettings()
         sendJson(Constants.KEY_EVENT, json)
         sendInbox()
+    }
+
+    fun sendSettings() {
+        sendJson(
+            Constants.KEY_EVENT,
+            JSONObject()
+                .put("version", Constants.PROTOCOL_VERSION)
+                .put("type", "settings")
+                .put("source", "phone")
+                .appendUserSettings(),
+        )
     }
 
     fun sendInbox() {
@@ -314,9 +326,25 @@ object RelayBridge {
                 .put("source", "phone")
                 .put("cxrConnected", cxrConnected)
                 .put("glassConnected", glassConnected)
-                .put("bootstrapState", bootstrapState),
+                .put("bootstrapState", bootstrapState)
+                .appendUserSettings(),
         )
         sendInbox()
+    }
+
+    private fun JSONObject.appendUserSettings(): JSONObject {
+        val context = appContext
+        if (context == null) {
+            put("notificationPopupDurationMs", NotificationSettingsStore.DEFAULT_POPUP_DURATION_MS)
+            put("inputCombo", RelayInputSettingsStore.DEFAULT_COMBO)
+            put("swipeMode", RelayInputSettingsStore.DEFAULT_SWIPE_MODE)
+            return this
+        }
+        val inputStore = RelayInputSettingsStore(context)
+        put("notificationPopupDurationMs", NotificationSettingsStore(context).popupDurationMs())
+        put("inputCombo", inputStore.inputCombo())
+        put("swipeMode", inputStore.swipeMode())
+        return this
     }
 
     private fun sendJson(key: String, json: JSONObject) {

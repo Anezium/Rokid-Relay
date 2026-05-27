@@ -372,7 +372,6 @@ object VoiceController {
         voiceActive = false
         activeNotificationId = ""
         val ok = if (context != null) ReplyRepository.sendReply(context, pending.notificationId, pending.text) else false
-        if (ok) ReplyRepository.forget(pending.notificationId)
         RelayBridge.recordOutgoingReply(pending.text, ok)
         RelayBridge.recordVoiceIdle("done")
         RelayBridge.sendReplyResult(

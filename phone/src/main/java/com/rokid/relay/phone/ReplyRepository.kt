@@ -24,6 +24,7 @@ object ReplyRepository {
         val appLabel: String,
         val title: String,
         val text: String,
+        val notificationKey: String,
         val actionIntent: PendingIntent,
         val remoteInputs: Array<RemoteInput>,
         val capturedAtMs: Long,
@@ -56,6 +57,7 @@ object ReplyRepository {
             appLabel = appLabel,
             title = title,
             text = text,
+            notificationKey = sbn.key,
             actionIntent = action.actionIntent,
             remoteInputs = remoteInputs,
             capturedAtMs = if (contentChanged) {
@@ -83,10 +85,20 @@ object ReplyRepository {
         }
         if (results.isEmpty) return false
         RemoteInput.addResultsToIntent(reply.remoteInputs, intent, results)
-        return runCatching {
+        RemoteInput.setResultsSource(intent, RemoteInput.SOURCE_FREE_FORM_INPUT)
+        val sent = runCatching {
             reply.actionIntent.send(context, 0, intent)
             true
         }.getOrDefault(false)
+        if (sent) {
+            if (NotificationSettingsStore(context).clearPhoneNotificationAfterReply()) {
+                NotificationControl.cancelAfterReply(reply.notificationKey)
+            }
+            pending.computeIfPresent(notificationId) { _, current ->
+                if (current === reply) null else current
+            }
+        }
+        return sent
     }
 
     fun forget(notificationId: String) {

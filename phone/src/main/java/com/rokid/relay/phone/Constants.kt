@@ -29,7 +29,12 @@ object Constants {
     const val PREF_STT_OPENAI_LABEL = "stt_openai_label"
     const val PREF_STT_ELEVENLABS_KEY = "stt_elevenlabs_key"
     const val PREF_STT_ELEVENLABS_LABEL = "stt_elevenlabs_label"
+    const val PREF_NOTIFICATION_POPUP_DURATION_MS = "notification_popup_duration_ms"
+    const val PREF_CLEAR_PHONE_NOTIFICATION_AFTER_REPLY = "clear_phone_notification_after_reply"
+    const val PREF_INPUT_COMBO = "input_combo"
+    const val PREF_SWIPE_MODE = "swipe_mode"
 
     const val TEST_NOTIFICATION_ID = 7202
+    const val TEST_NOTIFICATION_SECOND_THREAD_ID = 7203
     const val TEST_NOTIFICATION_CHANNEL = "rokid_relay_test"
 }

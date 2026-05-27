@@ -45,6 +45,9 @@ class MainActivity : Activity() {
             KEYCODE_SWIPE_FORWARD,
             KEYCODE_SWIPE_BACK,
             -> {
+                keyInputSource(keyCode)?.let { source ->
+                    if (!RelayHudController.isInputSourceEnabled(source)) return true
+                }
                 handleDirection(directionFromKey(keyCode) ?: return false)
             }
             KeyEvent.KEYCODE_ENTER,
@@ -76,14 +79,14 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun handleDirection(direction: Direction): Boolean {
+    private fun handleDirection(direction: RelayDirection): Boolean {
         if (RelayHudController.isVoiceActive()) return true
         if (RelayHudController.isInboxDetailOpen()) {
             pageInboxDetail(direction)
             return true
         }
         if (RelayHudController.isInboxOpen()) {
-            RelayHudController.navigateInbox(if (direction == Direction.LEFT) -1 else 1)
+            RelayHudController.navigateInbox(if (direction == RelayDirection.LEFT) -1 else 1)
             return true
         }
         if (RelayHudController.hasNotification()) {
@@ -99,34 +102,38 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun pageInboxDetail(direction: Direction) {
+    private fun pageInboxDetail(direction: RelayDirection) {
         val now = SystemClock.elapsedRealtime()
         if (now - lastInboxPageAtMs < INBOX_PAGE_DEBOUNCE_MS) return
         lastInboxPageAtMs = now
-        RelayHudController.pageInboxDetail(if (direction == Direction.LEFT) -1 else 1)
+        RelayHudController.pageInboxDetail(if (direction == RelayDirection.LEFT) -1 else 1)
     }
 
-    private fun addToCombo(direction: Direction): Boolean {
+    private fun addToCombo(direction: RelayDirection): Boolean {
         val now = System.currentTimeMillis()
         if (now - lastComboInputAt > COMBO_TIMEOUT_MS) comboBuffer.clear()
         lastComboInputAt = now
         comboBuffer.add(direction)
-        if (comboBuffer.size > 4) comboBuffer.removeAt(0)
-        return comboBuffer.size == 4 &&
-            comboBuffer[0] == Direction.LEFT &&
-            comboBuffer[1] == Direction.LEFT &&
-            comboBuffer[2] == Direction.RIGHT &&
-            comboBuffer[3] == Direction.RIGHT
+        while (comboBuffer.size > RelayInputSettings.MAX_COMBO_LENGTH) comboBuffer.removeAt(0)
+        return RelayInputSettings.matchesCombo(comboBuffer, RelayHudController.inputCombo())
     }
 
-    private fun directionFromKey(keyCode: Int): Direction? =
+    private fun directionFromKey(keyCode: Int): RelayDirection? =
         when (keyCode) {
             KeyEvent.KEYCODE_DPAD_LEFT,
             KEYCODE_SWIPE_BACK,
-            -> Direction.LEFT
+            -> RelayDirection.LEFT
             KeyEvent.KEYCODE_DPAD_RIGHT,
             KEYCODE_SWIPE_FORWARD,
-            -> Direction.RIGHT
+            -> RelayDirection.RIGHT
+            else -> null
+        }
+
+    private fun keyInputSource(keyCode: Int): RelayInputSource? =
+        when (keyCode) {
+            KEYCODE_SWIPE_BACK,
+            KEYCODE_SWIPE_FORWARD,
+            -> RelayInputSource.NORMAL
             else -> null
         }
 
@@ -147,9 +154,7 @@ class MainActivity : Activity() {
         private const val INBOX_PAGE_DEBOUNCE_MS = 480L
     }
 
-    private enum class Direction { LEFT, RIGHT }
-
-    private val comboBuffer = ArrayList<Direction>(4)
+    private val comboBuffer = ArrayList<RelayDirection>(RelayInputSettings.MAX_COMBO_LENGTH)
     private var lastComboInputAt = 0L
     private var lastInboxPageAtMs = 0L
 }

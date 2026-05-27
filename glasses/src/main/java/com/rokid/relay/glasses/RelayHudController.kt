@@ -24,12 +24,16 @@ object RelayHudController {
         val replyEventId: Long = 0L,
         val transientLine: String = "",
         val accessibilityEnabled: Boolean = false,
+        val notificationPopupDurationMs: Long = DEFAULT_NOTIFICATION_POPUP_DURATION_MS,
+        val inputCombo: String = RelayInputSettings.DEFAULT_COMBO,
+        val swipeMode: String = RelayInputSettings.DEFAULT_SWIPE_MODE,
     )
 
     private val main = Handler(Looper.getMainLooper())
     private val views = LinkedHashSet<RelayHudView>()
     private val notificationShownListeners = LinkedHashSet<() -> Unit>()
     private val stateListeners = LinkedHashSet<(State) -> Unit>()
+    private var notificationAutoHideRunnable: Runnable? = null
     private val clearSentResultRunnable = Runnable {
         update {
             if (replyOk && voiceState == "idle") {
@@ -93,7 +97,7 @@ object RelayHudController {
     fun showNotification(model: RelayHudView.NotificationModel) {
         runOnMain {
             main.removeCallbacks(clearSentResultRunnable)
-            val shouldNotify = state.notification?.id != model.id
+            val shouldNotify = state.notification != model
             state = state.copy(
                 notification = model,
                 inboxVisible = false,
@@ -108,6 +112,25 @@ object RelayHudController {
             )
             dispatchState()
             if (shouldNotify) notificationShownListeners.forEach { it.invoke() }
+            scheduleNotificationAutoHide(model)
+        }
+    }
+
+    fun setNotificationPopupDuration(durationMs: Long) {
+        runOnMain {
+            state = state.copy(notificationPopupDurationMs = sanitizePopupDuration(durationMs))
+            dispatchState()
+            scheduleNotificationAutoHide(state.notification)
+        }
+    }
+
+    fun setInputSettings(combo: String?, swipeMode: String?) {
+        runOnMain {
+            state = state.copy(
+                inputCombo = combo?.let(RelayInputSettings::sanitizeCombo) ?: state.inputCombo,
+                swipeMode = swipeMode?.let(RelayInputSettings::sanitizeSwipeMode) ?: state.swipeMode,
+            )
+            dispatchState()
         }
     }
 
@@ -261,6 +284,7 @@ object RelayHudController {
     }
 
     fun clearNotification() {
+        cancelNotificationAutoHide()
         update {
             copy(
                 notification = null,
@@ -335,6 +359,12 @@ object RelayHudController {
         return snapshot.notification?.id.orEmpty()
     }
 
+    fun inputCombo(): String =
+        state.inputCombo
+
+    fun isInputSourceEnabled(source: RelayInputSource): Boolean =
+        RelayInputSettings.sourceEnabled(state.swipeMode, source)
+
     private fun setAccessibilityEnabled(enabled: Boolean) {
         update { copy(accessibilityEnabled = enabled) }
     }
@@ -368,5 +398,38 @@ object RelayHudController {
         }
     }
 
+    private fun scheduleNotificationAutoHide(model: RelayHudView.NotificationModel?) {
+        cancelNotificationAutoHide()
+        model ?: return
+        val durationMs = state.notificationPopupDurationMs
+        if (durationMs <= 0L) return
+        val runnable = Runnable {
+            update {
+                if (
+                    notification == model &&
+                    !inboxVisible &&
+                    voiceState == "idle" &&
+                    !replyOk
+                ) {
+                    copy(notification = null, transientLine = "")
+                } else {
+                    this
+                }
+            }
+        }
+        notificationAutoHideRunnable = runnable
+        main.postDelayed(runnable, durationMs)
+    }
+
+    private fun cancelNotificationAutoHide() {
+        notificationAutoHideRunnable?.let { main.removeCallbacks(it) }
+        notificationAutoHideRunnable = null
+    }
+
+    private fun sanitizePopupDuration(durationMs: Long): Long =
+        durationMs.coerceIn(0L, MAX_NOTIFICATION_POPUP_DURATION_MS)
+
     private const val SENT_RESULT_HOLD_MS = 1_250L
+    private const val DEFAULT_NOTIFICATION_POPUP_DURATION_MS = 5_000L
+    private const val MAX_NOTIFICATION_POPUP_DURATION_MS = 300_000L
 }

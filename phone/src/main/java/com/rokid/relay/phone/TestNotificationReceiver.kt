@@ -107,6 +107,7 @@ class TestNotificationReceiver : BroadcastReceiver() {
             context: Context,
             notificationId: Int = Constants.TEST_NOTIFICATION_ID,
             messageCount: Int = BURST_MESSAGES.size,
+            conversationTitle: String = "Rokid Relay test thread",
         ) {
             val appContext = context.applicationContext
             val manager = appContext.getSystemService(NotificationManager::class.java)
@@ -146,7 +147,7 @@ class TestNotificationReceiver : BroadcastReceiver() {
             val selectedMessages = BURST_MESSAGES.take(messageCount.coerceIn(2, BURST_MESSAGES.size))
             val now = System.currentTimeMillis()
             val style = Notification.MessagingStyle(user)
-                .setConversationTitle("Rokid Relay test thread")
+                .setConversationTitle(conversationTitle)
                 .setGroupConversation(true)
             selectedMessages.forEachIndexed { index, message ->
                 style.addMessage(
@@ -160,7 +161,7 @@ class TestNotificationReceiver : BroadcastReceiver() {
 
             val notification = Notification.Builder(appContext, Constants.TEST_NOTIFICATION_CHANNEL)
                 .setSmallIcon(R.drawable.ic_launcher)
-                .setContentTitle("Rokid Relay test thread")
+                .setContentTitle(conversationTitle)
                 .setContentText(selectedMessages.last())
                 .setStyle(style)
                 .setCategory(Notification.CATEGORY_MESSAGE)
@@ -171,6 +172,15 @@ class TestNotificationReceiver : BroadcastReceiver() {
 
             manager.notify(notificationId, notification)
             RelayBridge.setStatus("burst test notification posted")
+        }
+
+        fun postSecondThreadTestNotification(context: Context) {
+            postBurstTestNotification(
+                context = context,
+                notificationId = Constants.TEST_NOTIFICATION_SECOND_THREAD_ID,
+                messageCount = 8,
+                conversationTitle = "Rokid Relay second thread",
+            )
         }
 
         private fun handleReply(context: Context, intent: Intent) {

@@ -111,11 +111,14 @@ object RelayBridge {
         val obj = runCatching { JSONObject(payload) }.getOrNull() ?: return
         when (obj.optString("type")) {
             "state" -> {
+                applySettings(obj)
                 RelayHudController.setConnection(
                     if (obj.optBoolean("glassConnected")) "connected" else "waiting",
                 )
             }
+            "settings" -> applySettings(obj)
             "notification" -> {
+                applySettings(obj)
                 RelayHudController.showNotification(
                     RelayHudView.NotificationModel(
                         id = obj.optString("notificationId"),
@@ -157,6 +160,16 @@ object RelayBridge {
             }
             "notification_cleared" -> RelayHudController.clearNotification()
         }
+    }
+
+    private fun applySettings(obj: JSONObject) {
+        if (obj.has("notificationPopupDurationMs")) {
+            RelayHudController.setNotificationPopupDuration(obj.optLong("notificationPopupDurationMs", 5_000L))
+        }
+        RelayHudController.setInputSettings(
+            combo = if (obj.has("inputCombo")) obj.optString("inputCombo") else null,
+            swipeMode = if (obj.has("swipeMode")) obj.optString("swipeMode") else null,
+        )
     }
 
     private fun sendCommand(type: String, block: JSONObject.() -> Unit = {}) {

@@ -21,6 +21,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -34,6 +35,13 @@ class MainActivity : Activity() {
 
     private lateinit var setupRows: LinearLayout
     private lateinit var noticeText: TextView
+    private lateinit var notificationDurationSummary: TextView
+    private lateinit var notificationDurationInput: EditText
+    private lateinit var clearNotificationAfterReplyCheckBox: CheckBox
+    private lateinit var inputSummary: TextView
+    private lateinit var inputComboInput: EditText
+    private lateinit var normalSwipeButton: Button
+    private lateinit var twoFingerSwipeButton: Button
     private lateinit var sttSummary: TextView
     private lateinit var apiChoiceContainer: LinearLayout
     private lateinit var providerHint: TextView
@@ -137,6 +145,32 @@ class MainActivity : Activity() {
             addView(noticeText, matchWrap())
         })
 
+        root.addView(panel("Notifications") {
+            notificationDurationSummary = bodyText()
+            addView(notificationDurationSummary, matchWrap())
+            addView(label("Popup duration"), matchWrap(top = 14))
+            addView(notificationDurationEditor(), matchWrap(top = 8))
+            clearNotificationAfterReplyCheckBox = CheckBox(this@MainActivity).apply {
+                text = "Clear phone notification after reply"
+                textSize = 12.5f
+                includeFontPadding = false
+                setTextColor(COLOR_TEXT)
+                buttonTintList = android.content.res.ColorStateList.valueOf(COLOR_PHOSPHOR)
+                setOnClickListener {
+                    saveClearNotificationAfterReply(isChecked)
+                }
+            }
+            addView(clearNotificationAfterReplyCheckBox, matchWrap(top = 12))
+            addView(rule(), matchWrap(top = 14))
+            addView(label("Glasses input"), matchWrap(top = 12))
+            inputSummary = bodyText()
+            addView(inputSummary, matchWrap(top = 8))
+            addView(label("Inbox combo"), matchWrap(top = 14))
+            addView(inputComboEditor(), matchWrap(top = 8))
+            addView(label("Swipe input"), matchWrap(top = 14))
+            addView(swipeModeSelector(), matchWrap(top = 8))
+        })
+
         root.addView(panel("Speech") {
             sttSummary = bodyText()
             addView(sttSummary, matchWrap())
@@ -224,6 +258,10 @@ class MainActivity : Activity() {
             diagnosticsContainer.addView(buttonRow(
                 smallButton("Burst test", ButtonTone.Secondary) {
                     TestNotificationReceiver.postBurstTestNotification(this@MainActivity)
+                    renderStatus()
+                },
+                smallButton("Second thread", ButtonTone.Secondary) {
+                    TestNotificationReceiver.postSecondThreadTestNotification(this@MainActivity)
                     renderStatus()
                 },
             ), matchWrap(top = 8))
@@ -541,6 +579,21 @@ class MainActivity : Activity() {
             background = inputBackground()
         }
 
+    private fun numberInput(hintText: String): EditText =
+        EditText(this).apply {
+            hint = hintText
+            textSize = 14f
+            setSingleLine(true)
+            includeFontPadding = false
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setTextColor(COLOR_TEXT)
+            setHintTextColor(COLOR_DIM)
+            setSelectAllOnFocus(true)
+            setPadding(dp(10), 0, dp(10), 0)
+            minimumHeight = dp(42)
+            background = inputBackground()
+        }
+
     private fun setApiKeyVisibility(input: EditText, visible: Boolean) {
         input.inputType = InputType.TYPE_CLASS_TEXT or if (visible) {
             InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
@@ -638,6 +691,46 @@ class MainActivity : Activity() {
             sttSummary.setTextColor(if (sttReady) COLOR_TEXT else COLOR_MUTED)
         }
 
+        if (::notificationDurationSummary.isInitialized) {
+            val seconds = NotificationSettingsStore(this).popupDurationSeconds()
+            notificationDurationSummary.text = if (seconds == 0L) {
+                "Popup stays visible until dismissed. Enter 0 to keep this behavior."
+            } else {
+                "Popup hides after ${seconds}s. The notification stays available in the inbox."
+            }
+            notificationDurationSummary.setTextColor(COLOR_MUTED)
+            if (::notificationDurationInput.isInitialized && !notificationDurationInput.hasFocus()) {
+                notificationDurationInput.setText(seconds.toString())
+            }
+            if (::clearNotificationAfterReplyCheckBox.isInitialized) {
+                val clearAfterReply = NotificationSettingsStore(this).clearPhoneNotificationAfterReply()
+                if (clearNotificationAfterReplyCheckBox.isChecked != clearAfterReply) {
+                    clearNotificationAfterReplyCheckBox.isChecked = clearAfterReply
+                }
+            }
+        }
+
+        if (::inputSummary.isInitialized) {
+            val inputStore = RelayInputSettingsStore(this)
+            val combo = inputStore.inputCombo()
+            val swipeMode = inputStore.swipeMode()
+            inputSummary.text = buildString {
+                append("Inbox combo: ${RelayInputSettingsStore.displayCombo(combo)}. ")
+                append(
+                    if (swipeMode == RelayInputSettingsStore.SWIPE_MODE_TWO_FINGER) {
+                        "Two-finger swipe controls notifications and inbox."
+                    } else {
+                        "Normal swipe controls notifications and inbox."
+                    },
+                )
+            }
+            inputSummary.setTextColor(COLOR_MUTED)
+            if (::inputComboInput.isInitialized && !inputComboInput.hasFocus()) {
+                inputComboInput.setText(combo)
+            }
+            updateInputChoiceButtons(swipeMode)
+        }
+
         updateSpeechChoiceButtons(selectedEngine)
         updateApiKeys(selectedEngine, openAiLabel, elevenLabsLabel)
 
@@ -722,6 +815,124 @@ class MainActivity : Activity() {
         openAiKeyMeta.setTextColor(if (openAiLabel.isNullOrBlank()) COLOR_MUTED else COLOR_PHOSPHOR)
         elevenLabsKeyMeta.text = elevenLabsLabel ?: "not saved"
         elevenLabsKeyMeta.setTextColor(if (elevenLabsLabel.isNullOrBlank()) COLOR_MUTED else COLOR_PHOSPHOR)
+    }
+
+    private fun notificationDurationEditor(): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            notificationDurationInput = numberInput("5").apply {
+                setText(NotificationSettingsStore(this@MainActivity).popupDurationSeconds().toString())
+            }
+            addView(notificationDurationInput, LinearLayout.LayoutParams(0, dp(42), 1f))
+            addView(smallButton("OK", ButtonTone.Primary) {
+                saveNotificationDuration()
+            }, LinearLayout.LayoutParams(dp(82), dp(42)).apply {
+                leftMargin = dp(8)
+            })
+        }
+
+    private fun saveNotificationDuration() {
+        val raw = notificationDurationInput.text.toString().trim()
+        val seconds = raw.toLongOrNull()
+        if (seconds == null || seconds < 0L) {
+            toastLine("Enter a duration in seconds. Use 0 to keep the popup visible.")
+            return
+        }
+        val store = NotificationSettingsStore(this)
+        val clampedSeconds = seconds.coerceAtMost(NotificationSettingsStore.MAX_POPUP_DURATION_MS / 1_000L)
+        store.savePopupDurationSeconds(clampedSeconds)
+        notificationDurationInput.setText(clampedSeconds.toString())
+        notificationDurationInput.clearFocus()
+        RelayBridge.sendSettings()
+        renderStatus()
+        toastLine(if (clampedSeconds == 0L) "Popup stays visible" else "Popup duration saved: ${clampedSeconds}s")
+    }
+
+    private fun saveClearNotificationAfterReply(enabled: Boolean) {
+        NotificationSettingsStore(this).saveClearPhoneNotificationAfterReply(enabled)
+        renderStatus()
+        toastLine(
+            if (enabled) {
+                "Phone notifications will be cleared after replies"
+            } else {
+                "Phone notifications stay after replies"
+            },
+        )
+    }
+
+    private fun inputComboEditor(): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            inputComboInput = keyInput(RelayInputSettingsStore.DEFAULT_COMBO).apply {
+                setText(RelayInputSettingsStore(this@MainActivity).inputCombo())
+            }
+            addView(inputComboInput, LinearLayout.LayoutParams(0, dp(42), 1f))
+            addView(smallButton("OK", ButtonTone.Primary) {
+                saveInputCombo()
+            }, LinearLayout.LayoutParams(dp(82), dp(42)).apply {
+                leftMargin = dp(8)
+            })
+        }
+
+    private fun swipeModeSelector(): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            normalSwipeButton = selectorButton("Normal") {
+                saveSwipeMode(RelayInputSettingsStore.SWIPE_MODE_NORMAL)
+            }
+            twoFingerSwipeButton = selectorButton("Two-finger") {
+                saveSwipeMode(RelayInputSettingsStore.SWIPE_MODE_TWO_FINGER)
+            }
+            addView(normalSwipeButton, LinearLayout.LayoutParams(0, dp(40), 1f))
+            addView(twoFingerSwipeButton, LinearLayout.LayoutParams(0, dp(40), 1f).apply {
+                leftMargin = dp(8)
+            })
+        }
+
+    private fun saveInputCombo() {
+        val store = RelayInputSettingsStore(this)
+        val combo = store.saveInputCombo(inputComboInput.text.toString())
+        if (combo == null) {
+            toastLine("Use 2 to 8 steps with L/R or G/D.")
+            return
+        }
+        inputComboInput.setText(combo)
+        inputComboInput.clearFocus()
+        RelayBridge.sendSettings()
+        renderStatus()
+        toastLine("Combo saved: ${RelayInputSettingsStore.displayCombo(combo)}")
+    }
+
+    private fun saveSwipeMode(mode: String) {
+        val cleanMode = RelayInputSettingsStore.sanitizeSwipeMode(mode)
+        RelayInputSettingsStore(this).saveSwipeMode(cleanMode)
+        RelayBridge.sendSettings()
+        renderStatus()
+        toastLine(
+            if (cleanMode == RelayInputSettingsStore.SWIPE_MODE_TWO_FINGER) {
+                "Two-finger swipe selected"
+            } else {
+                "Normal swipe selected"
+            },
+        )
+    }
+
+    private fun updateInputChoiceButtons(swipeMode: String) {
+        if (!::normalSwipeButton.isInitialized || !::twoFingerSwipeButton.isInitialized) return
+        styleChoiceButton(normalSwipeButton, swipeMode == RelayInputSettingsStore.SWIPE_MODE_NORMAL)
+        styleChoiceButton(twoFingerSwipeButton, swipeMode == RelayInputSettingsStore.SWIPE_MODE_TWO_FINGER)
+    }
+
+    private fun styleChoiceButton(button: Button, isSelected: Boolean) {
+        button.setTextColor(if (isSelected) COLOR_PHOSPHOR else COLOR_TEXT)
+        button.background = roundedRect(
+            if (isSelected) COLOR_SELECTED else COLOR_FIELD,
+            if (isSelected) COLOR_PHOSPHOR_DIM else COLOR_STROKE,
+            radius = 8,
+            strokeWidth = if (isSelected) 2 else 1,
+        )
     }
 
     private fun updateDiagnosticsVisibility() {
