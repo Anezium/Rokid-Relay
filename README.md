@@ -29,7 +29,29 @@
 
 Rokid Relay is a development-preview split Android app. It is meant for local testing on a phone paired to Rokid glasses, not yet as a polished store release.
 
-Screenshots will be added after the phone and glasses UI are finalized.
+---
+
+## Screenshots
+
+<p align="center">
+  <img src="docs/media/rokid-relay-phone-home.png" alt="Rokid Relay phone home setup screen" width="250" />
+  <img src="docs/media/rokid-relay-phone-notifications.png" alt="Rokid Relay phone notification settings screen" width="250" />
+  <img src="docs/media/rokid-relay-phone-speech.png" alt="Rokid Relay phone speech settings screen" width="250" />
+</p>
+
+<p align="center">
+  <em>Phone setup, notification routing, and speech-to-text settings</em>
+</p>
+
+<p align="center">
+  <a href="docs/media/rokid-relay-hud-live.mp4">
+    <img src="docs/media/rokid-relay-hud-live-poster.png" alt="Rokid Relay glasses HUD demo video preview" width="260" />
+  </a>
+</p>
+
+<p align="center">
+  <em>Click the preview to open the silent glasses HUD demo video.</em>
+</p>
 
 ---
 
