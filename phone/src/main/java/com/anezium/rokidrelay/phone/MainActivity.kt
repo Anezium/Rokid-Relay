@@ -10,10 +10,12 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.provider.Settings
 import android.text.InputType
 import android.text.TextUtils
@@ -793,6 +795,7 @@ class MainActivity : Activity() {
         val hiRokid = CxrLAuth.isGlobalHiRokidInstalled(this)
         val notifications = notificationAccessEnabled()
         val authSaved = !savedToken().isNullOrBlank()
+        val batteryUnrestricted = batteryOptimizationsIgnored()
         val selectedEngine = SpeechToTextSettingsStore(this).selectedEngine()
         val stt = SttCredentialStore(this)
         val openAiLabel = stt.accountLabel(SpeechToTextCredentialKind.OPENAI)
@@ -832,6 +835,14 @@ class MainActivity : Activity() {
                 },
             ), matchWrap(top = 8))
             setupRows.addView(setupRow(
+                title = "Battery",
+                value = if (batteryUnrestricted) "Unrestricted" else "Recommended: set Unrestricted",
+                tone = if (batteryUnrestricted) StatusTone.Ready else StatusTone.Waiting,
+                actionLabel = "Open",
+                actionTone = ButtonTone.Secondary,
+                onClick = { openBatterySettings() },
+            ), matchWrap(top = 8))
+            setupRows.addView(setupRow(
                 title = "Relay service",
                 value = if (RelayService.running) "Forwarding notifications" else "Stopped",
                 tone = if (RelayService.running) StatusTone.Ready else StatusTone.Neutral,
@@ -850,6 +861,7 @@ class MainActivity : Activity() {
                 !authSaved -> "Authorize once, then the relay can start automatically."
                 !notifications -> "Notification access is still required."
                 !sttReady -> "Finish speech-to-text setup for voice replies."
+                !batteryUnrestricted -> "Ready. Set battery to Unrestricted for best reliability."
                 RelayService.running -> "Ready. Replyable notifications will forward to the glasses."
                 else -> "Ready to start."
             }
@@ -1573,6 +1585,28 @@ class MainActivity : Activity() {
             "enabled_notification_listeners",
         ).orEmpty()
         return enabled.contains(packageName)
+    }
+
+    private fun batteryOptimizationsIgnored(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
+            (getSystemService(Context.POWER_SERVICE) as PowerManager)
+                .isIgnoringBatteryOptimizations(packageName)
+
+    private fun openBatterySettings() {
+        val appSettings = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = Uri.parse("package:$packageName")
+        }
+        runCatching {
+            startActivity(appSettings)
+        }.recoverCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+            } else {
+                startActivity(Intent(Settings.ACTION_SETTINGS))
+            }
+        }.onFailure {
+            toastLine("Battery settings unavailable on this device.")
+        }
     }
 
     private fun savedToken(): String? =
