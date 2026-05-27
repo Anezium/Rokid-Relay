@@ -47,6 +47,10 @@ class AndroidCxrSpeechRecognizer(
     private var bestPartialTranscript = ""
     private var lastDiagnosticsAtMs = 0L
     private var firstByteTimeout: Runnable? = null
+    private var vadRunnable: Runnable? = null
+    private var finalResultTimeout: Runnable? = null
+    private var inputClosed = false
+    private var inputCloseReason = ""
 
     fun start(): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
@@ -115,6 +119,8 @@ class AndroidCxrSpeechRecognizer(
                 audioPipeOutput = FileOutputStream(pipe[1].fileDescriptor)
                 audioSourceActive = true
                 finished = false
+                inputClosed = false
+                inputCloseReason = ""
                 bestPartialTranscript = ""
                 lastDiagnosticsAtMs = 0L
                 voiceActivityDetector.reset(SystemClock.elapsedRealtime())
@@ -127,6 +133,7 @@ class AndroidCxrSpeechRecognizer(
                 null
             } else {
                 scheduleFirstByteTimeout()
+                startVadMonitor()
                 pipe[0]
             }
         }.getOrElse { error ->
@@ -183,6 +190,27 @@ class AndroidCxrSpeechRecognizer(
         snapshotForDiagnostics?.let { snapshot -> main.post { listener.onAudioLevel(snapshot) } }
     }
 
+    private fun startVadMonitor() {
+        vadRunnable?.let(main::removeCallbacks)
+        vadRunnable = object : Runnable {
+            override fun run() {
+                val reason = synchronized(audioLock) {
+                    if (!audioSourceActive || finished || inputClosed) {
+                        null
+                    } else {
+                        voiceActivityDetector.closeReason(SystemClock.elapsedRealtime())
+                    }
+                }
+                if (reason != null) {
+                    Log.i(TAG, "Closing CXR recognizer input reason=$reason")
+                    closeRecognizerInput(reason)
+                    return
+                }
+                main.postDelayed(this, VAD_CHECK_INTERVAL_MS)
+            }
+        }.also { main.postDelayed(it, VAD_CHECK_INTERVAL_MS) }
+    }
+
     private fun recognitionListener(owner: SpeechRecognizer): RecognitionListener =
         object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {
@@ -204,8 +232,11 @@ class AndroidCxrSpeechRecognizer(
             override fun onError(error: Int) {
                 if (!isActive(owner)) return
                 val partial = bestPartialTranscript.trim()
-                if (partial.isNotBlank() && (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT)) {
-                    complete(partial, "android-partial-after-error-$error")
+                if (
+                    partial.isNotBlank() &&
+                    (inputClosed || error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT)
+                ) {
+                    complete(partial, "${inputCloseReason.ifBlank { "android-partial" }} error=$error")
                 } else {
                     fail(error.toVoiceMessage())
                 }
@@ -262,6 +293,10 @@ class AndroidCxrSpeechRecognizer(
         finished = true
         firstByteTimeout?.let(main::removeCallbacks)
         firstByteTimeout = null
+        vadRunnable?.let(main::removeCallbacks)
+        vadRunnable = null
+        finalResultTimeout?.let(main::removeCallbacks)
+        finalResultTimeout = null
         cleanupCxrAudioSource()
         val localRecognizer = recognizer
         recognizer = null
@@ -270,18 +305,57 @@ class AndroidCxrSpeechRecognizer(
         afterCleanup()
     }
 
+    private fun closeRecognizerInput(reason: String) {
+        if (finished) return
+        val localRecognizer = recognizer
+        synchronized(audioLock) {
+            if (inputClosed) return
+            inputClosed = true
+            inputCloseReason = reason
+            audioSourceActive = false
+            closeCxrWriteSideLocked()
+        }
+        vadRunnable?.let(main::removeCallbacks)
+        vadRunnable = null
+        firstByteTimeout?.let(main::removeCallbacks)
+        firstByteTimeout = null
+        runCatching { link.stopAudioStream() }
+        runCatching { link.setCXRAudioCbk(null) }
+        runCatching { localRecognizer?.stopListening() }
+        scheduleFinalResultTimeout(reason)
+    }
+
+    private fun scheduleFinalResultTimeout(reason: String) {
+        finalResultTimeout?.let(main::removeCallbacks)
+        val timeout = Runnable {
+            if (finished) return@Runnable
+            val partial = bestPartialTranscript.trim()
+            if (partial.isNotBlank()) {
+                complete(partial, "android-partial-timeout $reason")
+            } else {
+                fail("No speech recognized")
+            }
+        }
+        finalResultTimeout = timeout
+        main.postDelayed(timeout, FINAL_RESULT_TIMEOUT_MS)
+    }
+
     private fun cleanupCxrAudioSource() {
         synchronized(audioLock) {
             audioSourceActive = false
-            runCatching { audioPipeOutput?.close() }
-            runCatching { audioPipeWrite?.close() }
+            closeCxrWriteSideLocked()
             runCatching { audioPipeRead?.close() }
-            audioPipeOutput = null
-            audioPipeWrite = null
             audioPipeRead = null
         }
         runCatching { link.stopAudioStream() }
         runCatching { link.setCXRAudioCbk(null) }
+    }
+
+    private fun closeCxrWriteSideLocked() {
+        runCatching { audioPipeOutput?.close() }
+        runCatching { audioPipeWrite?.close() }
+        audioPipeOutput = null
+        audioPipeWrite = null
     }
 
     private fun scheduleFirstByteTimeout() {
@@ -325,5 +399,7 @@ class AndroidCxrSpeechRecognizer(
         const val SPEECH_POSSIBLY_COMPLETE_SILENCE_MS = 2_500L
         const val SPEECH_COMPLETE_SILENCE_MS = 3_000L
         const val DIAGNOSTICS_UPDATE_MS = 500L
+        const val VAD_CHECK_INTERVAL_MS = 120L
+        const val FINAL_RESULT_TIMEOUT_MS = 2_500L
     }
 }

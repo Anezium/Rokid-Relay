@@ -43,6 +43,7 @@ class RelayAccessibilityService : AccessibilityService() {
     private var commandVolume: VolumeSnapshot? = null
     private var lastComboInputAt = 0L
     private var tapArmed = false
+    private val grabbedKeys = HashSet<Int>()
     private val comboBuffer = ArrayList<Direction>(4)
     private val singleTapRunnable = Runnable {
         tapArmed = false
@@ -89,12 +90,27 @@ class RelayAccessibilityService : AccessibilityService() {
     override fun onInterrupt() = Unit
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
+        val relayActive = isRelayInteractionActive()
+        val relayKey = isRelayControlKey(event.keyCode)
+        if (event.action == KeyEvent.ACTION_UP && grabbedKeys.remove(event.keyCode)) {
+            return true
+        }
         if (event.action != KeyEvent.ACTION_DOWN || event.repeatCount > 0) {
-            return RelayHudController.isInboxOpen() && isRelayControlKey(event.keyCode)
+            return (event.keyCode in grabbedKeys) || (relayActive && relayKey)
+        }
+        if (relayActive && relayKey) {
+            grabbedKeys.add(event.keyCode)
         }
 
         if (RelayHudController.isInboxOpen()) {
             return handleInboxKey(event.keyCode)
+        }
+
+        if (RelayHudController.isVoiceActive() && relayKey) {
+            if (isConfirmKey(event.keyCode) || event.keyCode == KeyEvent.KEYCODE_BACK) {
+                RelayBridge.cancelVoice()
+            }
+            return true
         }
 
         directionFromKey(event.keyCode)?.let { direction ->
@@ -107,9 +123,7 @@ class RelayAccessibilityService : AccessibilityService() {
         }
 
         return when (event.keyCode) {
-            KeyEvent.KEYCODE_ENTER,
-            KeyEvent.KEYCODE_DPAD_CENTER,
-            -> {
+            in CONFIRM_KEYS -> {
                 if (RelayHudController.hasNotification()) {
                     RelayBridge.dismiss()
                     true
@@ -234,9 +248,11 @@ class RelayAccessibilityService : AccessibilityService() {
     private fun directionFromKey(keyCode: Int): Direction? =
         when (keyCode) {
             KeyEvent.KEYCODE_DPAD_LEFT,
+            KeyEvent.KEYCODE_MEDIA_PREVIOUS,
             KEYCODE_SWIPE_BACK,
             -> Direction.LEFT
             KeyEvent.KEYCODE_DPAD_RIGHT,
+            KeyEvent.KEYCODE_MEDIA_NEXT,
             KEYCODE_SWIPE_FORWARD,
             -> Direction.RIGHT
             else -> null
@@ -244,9 +260,16 @@ class RelayAccessibilityService : AccessibilityService() {
 
     private fun isRelayControlKey(keyCode: Int): Boolean =
         directionFromKey(keyCode) != null ||
-            keyCode == KeyEvent.KEYCODE_ENTER ||
-            keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+            isConfirmKey(keyCode) ||
             keyCode == KeyEvent.KEYCODE_BACK
+
+    private fun isRelayInteractionActive(): Boolean =
+        RelayHudController.isInboxOpen() ||
+            RelayHudController.hasNotification() ||
+            RelayHudController.isVoiceActive()
+
+    private fun isConfirmKey(keyCode: Int): Boolean =
+        keyCode in CONFIRM_KEYS
 
     private fun restoreCommandVolumeSoon() {
         val snapshot = commandVolume ?: return
@@ -356,6 +379,14 @@ class RelayAccessibilityService : AccessibilityService() {
         private const val REPLY_WAKE_MS = 60_000L
         private const val INBOX_WAKE_MS = 30_000L
         private const val POST_REPLY_WAKE_MS = 4_000L
+        private val CONFIRM_KEYS = setOf(
+            KeyEvent.KEYCODE_ENTER,
+            KeyEvent.KEYCODE_DPAD_CENTER,
+            KeyEvent.KEYCODE_HEADSETHOOK,
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+            KeyEvent.KEYCODE_MEDIA_PLAY,
+            KeyEvent.KEYCODE_BUTTON_A,
+        )
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
