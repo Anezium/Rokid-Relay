@@ -44,13 +44,11 @@ Rokid Relay is a development-preview split Android app. It is meant for local te
 </p>
 
 <p align="center">
-  <a href="docs/media/rokid-relay-hud-live.mp4">
-    <img src="docs/media/rokid-relay-hud-live-poster.png" alt="Rokid Relay glasses HUD demo video preview" width="260" />
-  </a>
+  <img src="docs/media/rokid-relay-hud-live.gif" alt="Rokid Relay animated glasses HUD demo" width="260" />
 </p>
 
 <p align="center">
-  <em>Click the preview to open the silent glasses HUD demo video.</em>
+  <em>Animated glasses HUD demo</em>
 </p>
 
 ---
