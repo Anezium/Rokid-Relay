@@ -20,6 +20,7 @@ object Constants {
     const val EXTRA_TEST_MESSAGE = "rokid_relay_test_message"
     const val EXTRA_TEST_LONG = "rokid_relay_test_long"
     const val EXTRA_TEST_ID = "rokid_relay_test_id"
+    const val EXTRA_TEST_COUNT = "rokid_relay_test_count"
 
     const val PREFS = "rokid_relay"
     const val PREF_AUTH_TOKEN = "auth_token"

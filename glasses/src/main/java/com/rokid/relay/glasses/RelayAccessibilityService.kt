@@ -51,6 +51,7 @@ class RelayAccessibilityService : AccessibilityService() {
     private var lastReplyWakeSignature = ""
     private var lastReplyWakeAtMs = 0L
     private var lastComboInputAt = 0L
+    private var lastInboxPageAtMs = 0L
     private var tapArmed = false
     private val grabbedKeys = HashSet<Int>()
     private val comboBuffer = ArrayList<Direction>(4)
@@ -195,7 +196,11 @@ class RelayAccessibilityService : AccessibilityService() {
         directionFromKey(keyCode)?.let { direction ->
             tapArmed = false
             main.removeCallbacks(singleTapRunnable)
-            RelayHudController.navigateInbox(if (direction == Direction.LEFT) -1 else 1)
+            if (RelayHudController.isInboxDetailOpen()) {
+                pageInboxDetail(direction)
+            } else {
+                RelayHudController.navigateInbox(if (direction == Direction.LEFT) -1 else 1)
+            }
             keepReplyScreenOn(INBOX_WAKE_MS)
             return true
         }
@@ -245,7 +250,11 @@ class RelayAccessibilityService : AccessibilityService() {
     private fun onTwoFinger(direction: Direction) {
         if (commandVolume == null) commandVolume = VolumeSnapshot.capture(audioManager)
         if (RelayHudController.isInboxOpen()) {
-            RelayHudController.navigateInbox(if (direction == Direction.LEFT) -1 else 1)
+            if (RelayHudController.isInboxDetailOpen()) {
+                pageInboxDetail(direction)
+            } else {
+                RelayHudController.navigateInbox(if (direction == Direction.LEFT) -1 else 1)
+            }
             keepReplyScreenOn(INBOX_WAKE_MS)
             restoreCommandVolumeSoon()
             return
@@ -264,6 +273,13 @@ class RelayAccessibilityService : AccessibilityService() {
         RelayHudController.openInbox()
         keepReplyScreenOn(INBOX_WAKE_MS)
         return true
+    }
+
+    private fun pageInboxDetail(direction: Direction) {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastInboxPageAtMs < INBOX_PAGE_DEBOUNCE_MS) return
+        lastInboxPageAtMs = now
+        RelayHudController.pageInboxDetail(if (direction == Direction.LEFT) -1 else 1)
     }
 
     private fun addToCombo(direction: Direction): Boolean {
@@ -427,6 +443,7 @@ class RelayAccessibilityService : AccessibilityService() {
         private const val KEYCODE_SWIPE_BACK = 184
         private const val COMBO_TIMEOUT_MS = 2_200L
         private const val DOUBLE_TAP_MS = 220L
+        private const val INBOX_PAGE_DEBOUNCE_MS = 480L
         private const val NOTIFICATION_WAKE_MS = 5_000L
         private const val REPLY_WAKE_MS = 35_000L
         private const val REPLY_WAKE_REFRESH_MS = 12_000L

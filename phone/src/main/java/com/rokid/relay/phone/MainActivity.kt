@@ -221,6 +221,12 @@ class MainActivity : Activity() {
                     renderStatus()
                 },
             ), matchWrap(top = 10))
+            diagnosticsContainer.addView(buttonRow(
+                smallButton("Burst test", ButtonTone.Secondary) {
+                    TestNotificationReceiver.postBurstTestNotification(this@MainActivity)
+                    renderStatus()
+                },
+            ), matchWrap(top = 8))
             diagnosticsContainer.addView(rule(), matchWrap(top = 14))
             diagnosticsContainer.addView(label("Last activity"), matchWrap(top = 12))
             activityText = bodyText().apply {

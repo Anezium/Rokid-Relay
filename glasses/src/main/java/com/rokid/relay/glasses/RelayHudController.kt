@@ -14,6 +14,7 @@ object RelayHudController {
         val inboxVisible: Boolean = false,
         val inboxDetail: Boolean = false,
         val inboxIndex: Int = 0,
+        val inboxDetailPage: Int = 0,
         val voiceState: String = "idle",
         val voicePartial: String = "",
         val countdownMs: Long = 0L,
@@ -39,6 +40,7 @@ object RelayHudController {
                     voicePartial = "",
                     transientLine = "",
                     inboxDetail = if (inboxVisible && inbox.isEmpty()) false else inboxDetail,
+                    inboxDetailPage = if (inboxVisible && inbox.isEmpty()) 0 else inboxDetailPage,
                 )
             } else {
                 this
@@ -97,6 +99,7 @@ object RelayHudController {
                 inboxVisible = false,
                 inboxDetail = false,
                 inboxIndex = 0,
+                inboxDetailPage = 0,
                 voiceState = "idle",
                 voicePartial = "",
                 resultLine = "",
@@ -134,11 +137,19 @@ object RelayHudController {
             } else {
                 null
             }
+            val nextDetail = inboxDetail && items.isNotEmpty()
+            val selectedText = items.getOrNull(nextIndex)?.text.orEmpty()
+            val sameSelectedItem = selectedId != null && items.getOrNull(nextIndex)?.id == selectedId
             copy(
                 notification = nextNotification,
                 inbox = items,
                 inboxIndex = nextIndex,
-                inboxDetail = inboxDetail && items.isNotEmpty(),
+                inboxDetail = nextDetail,
+                inboxDetailPage = if (nextDetail && sameSelectedItem) {
+                    inboxDetailPage.coerceIn(0, NotificationTextPager.pageCount(selectedText) - 1)
+                } else {
+                    0
+                },
             )
         }
     }
@@ -148,6 +159,7 @@ object RelayHudController {
             copy(
                 inboxVisible = true,
                 inboxDetail = false,
+                inboxDetailPage = 0,
                 transientLine = "",
                 resultLine = "",
                 replyOk = false,
@@ -162,6 +174,7 @@ object RelayHudController {
             copy(
                 inboxVisible = false,
                 inboxDetail = false,
+                inboxDetailPage = 0,
                 transientLine = "",
                 resultLine = "",
                 replyOk = false,
@@ -174,12 +187,13 @@ object RelayHudController {
     fun navigateInbox(delta: Int) {
         update {
             if (inbox.isEmpty()) {
-                copy(inboxIndex = 0, inboxDetail = false)
+                copy(inboxIndex = 0, inboxDetail = false, inboxDetailPage = 0)
             } else {
                 val nextIndex = Math.floorMod(inboxIndex + delta, inbox.size)
                 copy(
                     inboxIndex = nextIndex,
                     inboxDetail = false,
+                    inboxDetailPage = 0,
                     transientLine = "",
                     resultLine = "",
                     replyOk = false,
@@ -193,10 +207,11 @@ object RelayHudController {
     fun openInboxDetail() {
         update {
             if (inbox.isEmpty()) {
-                copy(inboxDetail = false)
+                copy(inboxDetail = false, inboxDetailPage = 0)
             } else {
                 copy(
                     inboxDetail = true,
+                    inboxDetailPage = 0,
                     transientLine = "",
                     resultLine = "",
                     replyOk = false,
@@ -207,11 +222,33 @@ object RelayHudController {
         }
     }
 
+    fun pageInboxDetail(delta: Int): Boolean {
+        val snapshot = state
+        if (!snapshot.inboxVisible || !snapshot.inboxDetail) return false
+        val selected = snapshot.inbox.getOrNull(snapshot.inboxIndex) ?: return true
+        val pageCount = NotificationTextPager.pageCount(selected.text)
+        if (pageCount <= 1) return true
+        val nextPage = (snapshot.inboxDetailPage + delta).coerceIn(0, pageCount - 1)
+        if (nextPage == snapshot.inboxDetailPage) return true
+        update {
+            copy(
+                inboxDetailPage = nextPage,
+                transientLine = "",
+                resultLine = "",
+                replyOk = false,
+                voiceState = "idle",
+                voicePartial = "",
+            )
+        }
+        return true
+    }
+
     fun backInInbox() {
         update {
             if (inboxDetail) {
                 copy(
                     inboxDetail = false,
+                    inboxDetailPage = 0,
                     voiceState = "idle",
                     voicePartial = "",
                     resultLine = "",

@@ -59,6 +59,7 @@ class RelayHudView(
     private var inboxVisible = false
     private var inboxDetail = false
     private var inboxIndex = 0
+    private var inboxDetailPage = 0
     private var voiceState = "idle"
     private var voicePartial = ""
     private var countdownMs = 0L
@@ -88,6 +89,7 @@ class RelayHudView(
         inboxVisible = state.inboxVisible
         inboxDetail = state.inboxDetail
         inboxIndex = state.inboxIndex
+        inboxDetailPage = state.inboxDetailPage
         voiceState = state.voiceState
         voicePartial = state.voicePartial
         countdownMs = state.countdownMs
@@ -267,7 +269,7 @@ class RelayHudView(
         titleLabel.setTextColor(TEXT)
         appLabel.text = model.app.ifBlank { "Message" }
         titleLabel.text = model.title.ifBlank { "Replyable notification" }
-        val hasVoiceTranscript = renderMessageBody(model.text)
+        val hasVoiceTranscript = renderMessageBody(NotificationTextPager.page(model.text, 0))
         renderStatus(hasVoiceTranscript)
     }
 
@@ -315,8 +317,11 @@ class RelayHudView(
             messageLabel.visibility = VISIBLE
             appLabel.text = selected.app.ifBlank { "Message" }
             titleLabel.text = selected.title.ifBlank { "Replyable notification" }
-            val hasVoiceTranscript = renderMessageBody(selected.text)
+            val pages = NotificationTextPager.pages(selected.text)
+            val pageIndex = inboxDetailPage.coerceIn(0, pages.lastIndex)
+            val hasVoiceTranscript = renderMessageBody(pages[pageIndex])
             renderStatus(hasVoiceTranscript)
+            renderPageHint(pageIndex, pages.size)
             return
         }
 
@@ -338,11 +343,24 @@ class RelayHudView(
                 val selectedRow = start + rowIndex == selectedIndex
                 row.visibility = VISIBLE
                 row.setTextColor(if (selectedRow) ACCENT else TEXT)
+                val preview = oneLine(NotificationTextPager.page(item.text, 0))
                 row.text = "${if (selectedRow) ">" else " "} ${item.app.ifBlank { "Message" }}: " +
-                    item.title.ifBlank { oneLine(item.text).ifBlank { "Replyable notification" } } +
-                    "  ${oneLine(item.text)}"
+                    item.title.ifBlank { preview.ifBlank { "Replyable notification" } } +
+                    "  $preview"
             }
         }
+    }
+
+    private fun renderPageHint(pageIndex: Int, pageCount: Int) {
+        if (voiceState != "idle" || resultLine.isNotBlank()) return
+        val hint = transientLine.ifBlank {
+            if (pageCount > 1) "Page ${pageIndex + 1}/${pageCount}" else ""
+        }
+        hintLabel.text = hint
+        hintLabel.visibility = if (hint.isBlank()) GONE else VISIBLE
+        hintLabel.alpha = 1f
+        hintLabel.translationY = 0f
+        hintLabel.setTextColor(DIM)
     }
 
     private fun playSentAnimation() {

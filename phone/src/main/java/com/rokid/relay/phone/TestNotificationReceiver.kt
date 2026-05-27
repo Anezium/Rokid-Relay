@@ -3,6 +3,7 @@ package com.rokid.relay.phone
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.Person
 import android.app.PendingIntent
 import android.app.RemoteInput
 import android.content.BroadcastReceiver
@@ -15,10 +16,15 @@ class TestNotificationReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         when (intent?.action) {
             Constants.ACTION_POST_TEST_NOTIFICATION -> {
-                val message = intent.getStringExtra(Constants.EXTRA_TEST_MESSAGE)
-                    ?: if (intent.getBooleanExtra(Constants.EXTRA_TEST_LONG, false)) LONG_TEST_MESSAGE else DEFAULT_TEST_MESSAGE
                 val notificationId = intent.getIntExtra(Constants.EXTRA_TEST_ID, Constants.TEST_NOTIFICATION_ID)
-                postTestNotification(context, message, notificationId)
+                val messageCount = intent.getIntExtra(Constants.EXTRA_TEST_COUNT, 0)
+                if (messageCount > 1) {
+                    postBurstTestNotification(context, notificationId, messageCount)
+                } else {
+                    val message = intent.getStringExtra(Constants.EXTRA_TEST_MESSAGE)
+                        ?: if (intent.getBooleanExtra(Constants.EXTRA_TEST_LONG, false)) LONG_TEST_MESSAGE else DEFAULT_TEST_MESSAGE
+                    postTestNotification(context, message, notificationId)
+                }
             }
             Constants.ACTION_TEST_REPLY -> handleReply(context, intent)
         }
@@ -31,6 +37,20 @@ class TestNotificationReceiver : BroadcastReceiver() {
             "Long message de test pour Rokid Relay. Il doit rester lisible sur les lunettes sans prendre tout l'ecran: " +
                 "on garde quelques lignes utiles, puis le reste est tronque proprement. Cette phrase ajoute volontairement " +
                 "du contenu pour verifier l'ellipse, la hauteur maximale et le confort en notification reelle."
+        private val BURST_MESSAGES = listOf(
+            "Yo tu peux checker le build ?",
+            "J'ai pousse trois messages d'un coup pour simuler Discord.",
+            "Le HUD devrait afficher les derniers messages ensemble.",
+            "Ensuite l'inbox doit permettre de feuilleter sans sauter partout.",
+            "Celui-ci ajoute une deuxieme page lisible.",
+            "Swipe droit: page suivante, avec debounce.",
+            "Swipe gauche: page precedente, sans wrap bizarre.",
+            "Tap dans le detail: on garde la reponse vocale.",
+            "Back revient a la liste des notifications.",
+            "Message dix pour verifier que le debut ne casse pas.",
+            "Encore un message court, facon spam reel.",
+            "Dernier message: celui-ci doit etre visible en premier dans le popup.",
+        )
 
         fun postTestNotification(
             context: Context,
@@ -81,6 +101,76 @@ class TestNotificationReceiver : BroadcastReceiver() {
 
             manager.notify(notificationId, notification)
             RelayBridge.setStatus("test notification posted")
+        }
+
+        fun postBurstTestNotification(
+            context: Context,
+            notificationId: Int = Constants.TEST_NOTIFICATION_ID,
+            messageCount: Int = BURST_MESSAGES.size,
+        ) {
+            val appContext = context.applicationContext
+            val manager = appContext.getSystemService(NotificationManager::class.java)
+            ensureChannel(manager)
+
+            val replyIntent = Intent(appContext, TestNotificationReceiver::class.java)
+                .setAction(Constants.ACTION_TEST_REPLY)
+                .putExtra(Constants.EXTRA_TEST_ID, notificationId)
+            val replyPendingIntent = PendingIntent.getBroadcast(
+                appContext,
+                notificationId,
+                replyIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or mutableFlag(),
+            )
+            val remoteInput = RemoteInput.Builder(Constants.EXTRA_TEST_REPLY)
+                .setLabel("Reply")
+                .build()
+            val replyAction = Notification.Action.Builder(
+                R.drawable.ic_launcher,
+                "Reply",
+                replyPendingIntent,
+            )
+                .addRemoteInput(remoteInput)
+                .build()
+            val contentIntent = PendingIntent.getActivity(
+                appContext,
+                notificationId,
+                Intent(appContext, MainActivity::class.java),
+                PendingIntent.FLAG_UPDATE_CURRENT or immutableFlag(),
+            )
+            val user = Person.Builder().setName("You").build()
+            val senders = listOf(
+                Person.Builder().setName("Mika").build(),
+                Person.Builder().setName("Nina").build(),
+                Person.Builder().setName("Sam").build(),
+            )
+            val selectedMessages = BURST_MESSAGES.take(messageCount.coerceIn(2, BURST_MESSAGES.size))
+            val now = System.currentTimeMillis()
+            val style = Notification.MessagingStyle(user)
+                .setConversationTitle("Rokid Relay test thread")
+                .setGroupConversation(true)
+            selectedMessages.forEachIndexed { index, message ->
+                style.addMessage(
+                    Notification.MessagingStyle.Message(
+                        message,
+                        now - (selectedMessages.size - index) * 1_000L,
+                        senders[index % senders.size],
+                    ),
+                )
+            }
+
+            val notification = Notification.Builder(appContext, Constants.TEST_NOTIFICATION_CHANNEL)
+                .setSmallIcon(R.drawable.ic_launcher)
+                .setContentTitle("Rokid Relay test thread")
+                .setContentText(selectedMessages.last())
+                .setStyle(style)
+                .setCategory(Notification.CATEGORY_MESSAGE)
+                .setContentIntent(contentIntent)
+                .setAutoCancel(false)
+                .addAction(replyAction)
+                .build()
+
+            manager.notify(notificationId, notification)
+            RelayBridge.setStatus("burst test notification posted")
         }
 
         private fun handleReply(context: Context, intent: Intent) {

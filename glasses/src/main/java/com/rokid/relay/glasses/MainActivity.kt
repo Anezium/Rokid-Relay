@@ -3,6 +3,7 @@ package com.rokid.relay.glasses
 import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
+import android.os.SystemClock
 import android.provider.Settings
 import android.view.KeyEvent
 import android.view.Window
@@ -77,6 +78,10 @@ class MainActivity : Activity() {
 
     private fun handleDirection(direction: Direction): Boolean {
         if (RelayHudController.isVoiceActive()) return true
+        if (RelayHudController.isInboxDetailOpen()) {
+            pageInboxDetail(direction)
+            return true
+        }
         if (RelayHudController.isInboxOpen()) {
             RelayHudController.navigateInbox(if (direction == Direction.LEFT) -1 else 1)
             return true
@@ -92,6 +97,13 @@ class MainActivity : Activity() {
         } else {
             false
         }
+    }
+
+    private fun pageInboxDetail(direction: Direction) {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastInboxPageAtMs < INBOX_PAGE_DEBOUNCE_MS) return
+        lastInboxPageAtMs = now
+        RelayHudController.pageInboxDetail(if (direction == Direction.LEFT) -1 else 1)
     }
 
     private fun addToCombo(direction: Direction): Boolean {
@@ -132,10 +144,12 @@ class MainActivity : Activity() {
         private const val KEYCODE_SWIPE_FORWARD = 183
         private const val KEYCODE_SWIPE_BACK = 184
         private const val COMBO_TIMEOUT_MS = 2_200L
+        private const val INBOX_PAGE_DEBOUNCE_MS = 480L
     }
 
     private enum class Direction { LEFT, RIGHT }
 
     private val comboBuffer = ArrayList<Direction>(4)
     private var lastComboInputAt = 0L
+    private var lastInboxPageAtMs = 0L
 }

@@ -4,7 +4,9 @@ import android.app.Notification
 import android.app.PendingIntent
 import android.app.RemoteInput
 import android.content.Context
+import android.os.Build
 import android.os.Bundle
+import android.os.Parcelable
 import android.service.notification.StatusBarNotification
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
@@ -110,13 +112,46 @@ object ReplyRepository {
         }
 
     private fun notificationText(extras: Bundle): String {
+        val messages = messagingStyleText(extras)
+        if (messages.isNotBlank()) return messages
+
         val big = extras.charSequence(Notification.EXTRA_BIG_TEXT)
         if (!big.isNullOrBlank()) return big.toString()
-        val text = extras.charSequence(Notification.EXTRA_TEXT)
-        if (!text.isNullOrBlank()) return text.toString()
+
         val lines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
-        return lines?.joinToString("\n") { it.toString() }.orEmpty()
+        if (!lines.isNullOrEmpty()) {
+            return lines
+                .takeLast(MAX_VISIBLE_MESSAGE_COUNT)
+                .joinToString("\n") { it.toString() }
+        }
+
+        val text = extras.charSequence(Notification.EXTRA_TEXT)
+        return text?.toString().orEmpty()
     }
+
+    private fun messagingStyleText(extras: Bundle): String {
+        val bundles = messageBundles(extras) ?: return ""
+        return Notification.MessagingStyle.Message.getMessagesFromBundleArray(bundles)
+            .takeLast(MAX_VISIBLE_MESSAGE_COUNT)
+            .mapNotNull { message ->
+                val text = message.text?.toString()?.trim().orEmpty()
+                if (text.isBlank()) {
+                    null
+                } else {
+                    val sender = message.senderPerson?.name?.toString()?.trim().orEmpty()
+                    if (sender.isBlank()) text else "$sender: $text"
+                }
+            }
+            .joinToString("\n")
+    }
+
+    private fun messageBundles(extras: Bundle): Array<Parcelable>? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            extras.getParcelableArray(Notification.EXTRA_MESSAGES, Parcelable::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            extras.getParcelableArray(Notification.EXTRA_MESSAGES)
+        }
 
     private fun appLabel(context: Context, packageName: String): String =
         runCatching {
@@ -148,6 +183,8 @@ object ReplyRepository {
         val digest = MessageDigest.getInstance("SHA-256").digest(key.toByteArray())
         return digest.take(10).joinToString("") { "%02x".format(it) }
     }
+
+    private const val MAX_VISIBLE_MESSAGE_COUNT = 12
 }
 
 private fun Bundle.charSequence(key: String): CharSequence? =
