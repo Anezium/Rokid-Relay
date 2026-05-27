@@ -388,12 +388,18 @@ object RelayHudController {
     }
 
     private fun isAccessibilityEnabled(context: Context): Boolean {
-        val component = ComponentName(context, RelayAccessibilityService::class.java).flattenToString()
+        val component = ComponentName(context, RelayAccessibilityService::class.java)
+        val componentLong = component.flattenToString()
+        val componentShort = component.flattenToShortString()
         val enabled = Settings.Secure.getString(
             context.contentResolver,
             Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
         ).orEmpty()
-        return enabled.split(':').any { it.equals(component, ignoreCase = true) }
+        return enabled.split(':').any { value ->
+            value.equals(componentLong, ignoreCase = true) ||
+                value.equals(componentShort, ignoreCase = true) ||
+                ComponentName.unflattenFromString(value) == component
+        }
     }
 
     private fun update(block: State.() -> State) {
