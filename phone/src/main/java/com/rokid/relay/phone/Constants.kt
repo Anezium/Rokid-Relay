@@ -1,0 +1,31 @@
+package com.rokid.relay.phone
+
+object Constants {
+    const val AUTH_REQUEST_CODE = 7201
+    const val CLIENT_PACKAGE = "com.rokid.relay.glasses"
+    const val CLIENT_MAIN_ACTIVITY = "com.rokid.relay.glasses.MainActivity"
+    const val CLIENT_ASSET_NAME = "rokid-relay-glasses.apk"
+
+    const val KEY_EVENT = "rokid_relay.event"
+    const val KEY_COMMAND = "rokid_relay.command"
+    const val PROTOCOL_VERSION = 1
+
+    const val ACTION_START = "com.rokid.relay.phone.START"
+    const val ACTION_STOP = "com.rokid.relay.phone.STOP"
+    const val ACTION_POST_TEST_NOTIFICATION = "com.rokid.relay.phone.POST_TEST_NOTIFICATION"
+    const val ACTION_TEST_REPLY = "com.rokid.relay.phone.TEST_REPLY"
+    const val EXTRA_TOKEN = "token"
+    const val EXTRA_START_REASON = "start_reason"
+    const val EXTRA_TEST_REPLY = "rokid_relay_test_reply"
+    const val EXTRA_TEST_MESSAGE = "rokid_relay_test_message"
+    const val EXTRA_TEST_LONG = "rokid_relay_test_long"
+    const val EXTRA_TEST_ID = "rokid_relay_test_id"
+
+    const val PREFS = "rokid_relay"
+    const val PREF_AUTH_TOKEN = "auth_token"
+    const val PREF_STT_OPENAI_KEY = "stt_openai_key"
+    const val PREF_STT_OPENAI_LABEL = "stt_openai_label"
+
+    const val TEST_NOTIFICATION_ID = 7202
+    const val TEST_NOTIFICATION_CHANNEL = "rokid_relay_test"
+}

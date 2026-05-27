@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Rokid Relay</string>
+    <string name="relay_notification_title">Rokid Relay running</string>
+    <string name="relay_notification_text">Forwarding replyable notifications to the glasses</string>
+</resources>

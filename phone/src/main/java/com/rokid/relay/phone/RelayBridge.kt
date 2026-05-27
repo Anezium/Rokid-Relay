@@ -1,0 +1,275 @@
+package com.rokid.relay.phone
+
+import android.content.Context
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
+import com.example.cxrglobal.CXRLink
+import com.example.cxrglobal.CxrDefs
+import com.example.cxrglobal.callbacks.ICXRLinkCbk
+import com.example.cxrglobal.callbacks.ICustomCmdCbk
+import com.rokid.cxr.Caps
+import org.json.JSONArray
+import org.json.JSONObject
+
+object RelayBridge {
+    data class Snapshot(
+        val cxrConnected: Boolean,
+        val glassConnected: Boolean,
+        val bootstrapState: String,
+        val lastStatus: String,
+        val lastOutgoingReply: String,
+        val lastDeliveredReply: String,
+    )
+
+    private const val TAG = "RokidRelayBridge"
+    private val main = Handler(Looper.getMainLooper())
+
+    @Volatile private var cxrConnected = false
+    @Volatile private var glassConnected = false
+    @Volatile private var bootstrapState = "idle"
+    @Volatile private var lastStatus = "idle"
+    @Volatile private var lastOutgoingReply = ""
+    @Volatile private var lastDeliveredReply = ""
+    @Volatile private var bootstrapStarted = false
+
+    private var appContext: Context? = null
+    private var link: CXRLink? = null
+
+    fun start(context: Context, token: String) {
+        appContext = context.applicationContext
+        main.post { startOnMain(context.applicationContext, token) }
+    }
+
+    fun stop() {
+        main.post {
+            VoiceController.cancel()
+            runCatching { link?.disconnect() }
+            link = null
+            cxrConnected = false
+            glassConnected = false
+            bootstrapStarted = false
+            bootstrapState = "stopped"
+            lastStatus = "stopped"
+        }
+    }
+
+    fun setStatus(text: String) {
+        lastStatus = text
+    }
+
+    fun recordOutgoingReply(text: String, sent: Boolean) {
+        lastOutgoingReply = text
+        lastStatus = if (sent) "reply sent" else "reply send failed"
+    }
+
+    fun recordDeliveredReply(text: String) {
+        lastDeliveredReply = text
+        lastStatus = if (text.isBlank()) "test reply received empty" else "test reply received"
+    }
+
+    fun snapshot(): Snapshot = Snapshot(
+        cxrConnected = cxrConnected,
+        glassConnected = glassConnected,
+        bootstrapState = bootstrapState,
+        lastStatus = lastStatus,
+        lastOutgoingReply = lastOutgoingReply,
+        lastDeliveredReply = lastDeliveredReply,
+    )
+
+    fun sendNotification(reply: ReplyRepository.PendingReply) {
+        val json = JSONObject()
+            .put("version", Constants.PROTOCOL_VERSION)
+            .put("type", "notification")
+            .put("source", "phone")
+            .put("notificationId", reply.id)
+            .put("appPackage", reply.packageName)
+            .put("appLabel", reply.appLabel)
+            .put("title", reply.title)
+            .put("text", reply.text)
+            .put("canReply", true)
+        sendJson(Constants.KEY_EVENT, json)
+        sendInbox()
+    }
+
+    fun sendInbox() {
+        val items = ReplyRepository.listPending()
+        val notifications = JSONArray()
+        items.forEach { reply ->
+            notifications.put(
+                JSONObject()
+                    .put("notificationId", reply.id)
+                    .put("appPackage", reply.packageName)
+                    .put("appLabel", reply.appLabel)
+                    .put("title", reply.title)
+                    .put("text", reply.text)
+                    .put("canReply", true),
+            )
+        }
+        sendJson(
+            Constants.KEY_EVENT,
+            JSONObject()
+                .put("version", Constants.PROTOCOL_VERSION)
+                .put("type", "inbox")
+                .put("source", "phone")
+                .put("notifications", notifications),
+        )
+    }
+
+    fun sendVoiceState(state: String, partial: String = "") {
+        sendJson(
+            Constants.KEY_EVENT,
+            JSONObject()
+                .put("version", Constants.PROTOCOL_VERSION)
+                .put("type", "voice_state")
+                .put("source", "phone")
+                .put("state", state)
+                .put("partial", partial),
+        )
+    }
+
+    fun sendReplyResult(notificationId: String, ok: Boolean, message: String) {
+        sendJson(
+            Constants.KEY_EVENT,
+            JSONObject()
+                .put("version", Constants.PROTOCOL_VERSION)
+                .put("type", "reply_result")
+                .put("source", "phone")
+                .put("notificationId", notificationId)
+                .put("ok", ok)
+                .put("message", message),
+        )
+    }
+
+    private fun startOnMain(context: Context, token: String) {
+        if (link == null) {
+            link = CXRLink(context).apply {
+                configCXRSession(
+                    CxrDefs.CXRSession(
+                        CxrDefs.CXRSessionType.CUSTOMAPP,
+                        Constants.CLIENT_PACKAGE,
+                    ),
+                )
+                setCXRLinkCbk(linkCallback)
+                setCXRCustomCmdCbk(commandCallback)
+            }
+        }
+        bootstrapState = "waiting for glasses"
+        lastStatus = "binding Hi Rokid service"
+        val bound = runCatching { link?.connect(token) == true }.getOrDefault(false)
+        if (!bound) {
+            lastStatus = "Hi Rokid bind failed"
+            bootstrapState = "not connected"
+        }
+    }
+
+    private val linkCallback = object : ICXRLinkCbk {
+        override fun onCXRLConnected(connected: Boolean) {
+            cxrConnected = connected
+            lastStatus = if (connected) "CXR-L connected" else "CXR-L disconnected"
+            if (connected) sendState()
+            maybeBootstrap()
+        }
+
+        override fun onGlassBtConnected(connected: Boolean) {
+            glassConnected = connected
+            lastStatus = if (connected) "glasses connected" else "glasses disconnected"
+            maybeBootstrap()
+        }
+
+        override fun onGlassAiAssistStart() {
+            lastStatus = "AI key down"
+        }
+
+        override fun onGlassAiAssistStop() {
+            lastStatus = "AI key up"
+        }
+    }
+
+    private val commandCallback = object : ICustomCmdCbk {
+        override fun onCustomCmdResult(key: String, payload: ByteArray) {
+            if (key != Constants.KEY_COMMAND) return
+            val json = payloadToJson(payload) ?: return
+            handleCommand(json)
+        }
+    }
+
+    private fun maybeBootstrap() {
+        val context = appContext ?: return
+        val localLink = link ?: return
+        if (!cxrConnected || !glassConnected || bootstrapStarted) return
+        bootstrapStarted = true
+        bootstrapState = "starting glasses app"
+        Thread {
+            val result = ClientBootstrap(context, localLink).ensureRunning()
+            bootstrapState = result
+            lastStatus = result
+            sendState()
+        }.apply {
+            name = "RokidRelayBootstrap"
+            start()
+        }
+    }
+
+    private fun handleCommand(json: JSONObject) {
+        val type = json.optString("type")
+        val context = appContext ?: return
+        when (type) {
+            "request_state" -> sendState()
+            "start_voice" -> {
+                val id = json.optString("notificationId")
+                val localLink = link
+                if (id.isBlank() || localLink == null) {
+                    sendReplyResult(id, false, "No active notification")
+                } else {
+                    VoiceController.start(context, localLink, id)
+                }
+            }
+            "cancel_voice" -> VoiceController.cancel()
+            "dismiss_notification" -> {
+                val id = json.optString("notificationId")
+                ReplyRepository.forget(id)
+                sendJson(
+                    Constants.KEY_EVENT,
+                    JSONObject()
+                        .put("version", Constants.PROTOCOL_VERSION)
+                        .put("type", "notification_cleared")
+                        .put("source", "phone"),
+                )
+                sendInbox()
+            }
+        }
+    }
+
+    private fun sendState() {
+        sendJson(
+            Constants.KEY_EVENT,
+            JSONObject()
+                .put("version", Constants.PROTOCOL_VERSION)
+                .put("type", "state")
+                .put("source", "phone")
+                .put("cxrConnected", cxrConnected)
+                .put("glassConnected", glassConnected)
+                .put("bootstrapState", bootstrapState),
+        )
+        sendInbox()
+    }
+
+    private fun sendJson(key: String, json: JSONObject) {
+        val localLink = link ?: return
+        runCatching {
+            val bytes = Caps().apply { write(json.toString()) }.serialize()
+            localLink.sendCustomCmd(key, bytes)
+        }.onFailure {
+            Log.w(TAG, "send failed: ${it.message}")
+            lastStatus = "send failed"
+        }
+    }
+
+    private fun payloadToJson(payload: ByteArray): JSONObject? =
+        runCatching {
+            val caps = Caps.fromBytes(payload)
+            if (caps.size() == 0) return@runCatching null
+            JSONObject(caps.at(0).string)
+        }.getOrNull()
+}
