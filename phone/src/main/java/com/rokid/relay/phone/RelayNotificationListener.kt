@@ -13,9 +13,13 @@ class RelayNotificationListener : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         sbn ?: return
-        val pending = ReplyRepository.capture(this, sbn) ?: return
-        RelayBridge.setStatus("replyable notification from ${pending.appLabel}")
-        RelayBridge.sendNotification(pending)
+        val capture = ReplyRepository.capture(this, sbn) ?: return
+        if (capture.shouldShowNow) {
+            RelayBridge.setStatus("replyable notification from ${capture.reply.appLabel}")
+            RelayBridge.sendNotification(capture.reply)
+        } else {
+            RelayBridge.sendInbox()
+        }
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {

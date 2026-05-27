@@ -8,8 +8,14 @@ import android.os.Bundle
 import android.service.notification.StatusBarNotification
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 
 object ReplyRepository {
+    data class CaptureResult(
+        val reply: PendingReply,
+        val shouldShowNow: Boolean,
+    )
+
     data class PendingReply(
         val id: String,
         val packageName: String,
@@ -22,8 +28,9 @@ object ReplyRepository {
     )
 
     private val pending = ConcurrentHashMap<String, PendingReply>()
+    private val lastCaptureAtMs = AtomicLong(0L)
 
-    fun capture(context: Context, sbn: StatusBarNotification): PendingReply? {
+    fun capture(context: Context, sbn: StatusBarNotification): CaptureResult? {
         val action = findReplyAction(sbn.notification) ?: return null
         val remoteInputs = action.remoteInputs ?: return null
         if (remoteInputs.isEmpty()) return null
@@ -31,18 +38,35 @@ object ReplyRepository {
         val id = stableId(sbn.key)
         val extras = sbn.notification.extras
         val appLabel = appLabel(context, sbn.packageName)
+        val title = extras.charSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
+        val text = notificationText(extras)
+        val previous = pending[id]
+        val contentChanged = previous == null ||
+            !previous.hasSameVisibleContent(
+                packageName = sbn.packageName,
+                appLabel = appLabel,
+                title = title,
+                text = text,
+            )
         val reply = PendingReply(
             id = id,
             packageName = sbn.packageName,
             appLabel = appLabel,
-            title = extras.charSequence(Notification.EXTRA_TITLE)?.toString().orEmpty(),
-            text = notificationText(extras),
+            title = title,
+            text = text,
             actionIntent = action.actionIntent,
             remoteInputs = remoteInputs,
-            capturedAtMs = System.currentTimeMillis(),
+            capturedAtMs = if (contentChanged) {
+                nextCaptureAtMs()
+            } else {
+                previous?.capturedAtMs ?: nextCaptureAtMs()
+            },
         )
         pending[id] = reply
-        return reply
+        return CaptureResult(
+            reply = reply,
+            shouldShowNow = contentChanged && isMostRecent(reply.id),
+        )
     }
 
     fun sendReply(context: Context, notificationId: String, text: String): Boolean {
@@ -76,6 +100,9 @@ object ReplyRepository {
             .sortedByDescending { it.capturedAtMs }
             .take(limit.coerceAtLeast(1))
 
+    private fun isMostRecent(notificationId: String): Boolean =
+        pending.values.maxByOrNull { it.capturedAtMs }?.id == notificationId
+
     private fun findReplyAction(notification: Notification): Notification.Action? =
         notification.actions?.firstOrNull { action ->
             action.remoteInputs?.any { it.allowFreeFormInput } == true &&
@@ -96,6 +123,26 @@ object ReplyRepository {
             val pm = context.packageManager
             pm.getApplicationLabel(pm.getApplicationInfo(packageName, 0)).toString()
         }.getOrDefault(packageName)
+
+    private fun PendingReply.hasSameVisibleContent(
+        packageName: String,
+        appLabel: String,
+        title: String,
+        text: String,
+    ): Boolean =
+        this.packageName == packageName &&
+            this.appLabel == appLabel &&
+            this.title == title &&
+            this.text == text
+
+    private fun nextCaptureAtMs(): Long {
+        val now = System.currentTimeMillis()
+        while (true) {
+            val previous = lastCaptureAtMs.get()
+            val next = if (now > previous) now else previous + 1L
+            if (lastCaptureAtMs.compareAndSet(previous, next)) return next
+        }
+    }
 
     private fun stableId(key: String): String {
         val digest = MessageDigest.getInstance("SHA-256").digest(key.toByteArray())

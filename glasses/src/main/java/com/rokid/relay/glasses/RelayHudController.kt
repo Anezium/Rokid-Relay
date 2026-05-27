@@ -92,6 +92,9 @@ object RelayHudController {
             val shouldNotify = state.notification?.id != model.id
             state = state.copy(
                 notification = model,
+                inboxVisible = false,
+                inboxDetail = false,
+                inboxIndex = 0,
                 voiceState = "idle",
                 voicePartial = "",
                 resultLine = "",
@@ -105,13 +108,26 @@ object RelayHudController {
 
     fun setInbox(items: List<RelayHudView.NotificationModel>) {
         update {
-            val nextIndex = inboxIndex.coerceIn(0, (items.size - 1).coerceAtLeast(0))
+            val selectedId = inbox.getOrNull(inboxIndex)?.id
+            val nextIndex = when {
+                items.isEmpty() -> 0
+                inboxVisible && selectedId != null -> {
+                    val preservedIndex = items.indexOfFirst { it.id == selectedId }
+                    if (preservedIndex >= 0) preservedIndex else 0
+                }
+                else -> inboxIndex.coerceIn(0, items.lastIndex)
+            }
             val currentNotification = notification
+            val refreshedNotification = currentNotification?.let { current ->
+                items.firstOrNull { it.id == current.id } ?: current
+            }
             val nextNotification = if (
-                currentNotification == null ||
-                items.any { it.id == currentNotification.id } ||
-                (replyOk && resultLine.isNotBlank())
+                currentNotification == null
             ) {
+                null
+            } else if (items.any { it.id == currentNotification.id }) {
+                refreshedNotification
+            } else if (replyOk && resultLine.isNotBlank()) {
                 currentNotification
             } else {
                 null
