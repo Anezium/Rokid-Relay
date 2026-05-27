@@ -85,7 +85,9 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         requestRuntimePermissions()
-        setContentView(buildContent())
+        val content = buildContent()
+        setContentView(content)
+        KeyboardFocusScroller.install(this, content)
     }
 
     override fun onResume() {
