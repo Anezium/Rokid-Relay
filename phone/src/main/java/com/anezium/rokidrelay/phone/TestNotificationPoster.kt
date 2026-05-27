@@ -21,7 +21,7 @@ internal object TestNotificationPoster {
         ensureChannel(manager)
 
         val notification = Notification.Builder(appContext, Constants.TEST_NOTIFICATION_CHANNEL)
-            .setSmallIcon(R.drawable.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_relay)
             .setContentTitle("Rokid Relay test")
             .setContentText(message)
             .setStyle(Notification.BigTextStyle().bigText(message))
@@ -60,7 +60,7 @@ internal object TestNotificationPoster {
         }
 
         val notification = Notification.Builder(appContext, Constants.TEST_NOTIFICATION_CHANNEL)
-            .setSmallIcon(R.drawable.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_relay)
             .setContentTitle(conversationTitle)
             .setContentText(messages.lastOrNull()?.text ?: TestMessageFactory.DEFAULT_TEST_MESSAGE)
             .setStyle(style)
@@ -93,7 +93,7 @@ internal object TestNotificationPoster {
             .setLabel("Reply")
             .build()
         return Notification.Action.Builder(
-            R.drawable.ic_launcher,
+            R.drawable.ic_stat_relay,
             "Reply",
             replyPendingIntent,
         )

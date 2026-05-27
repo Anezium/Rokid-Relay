@@ -111,12 +111,12 @@ class RelayService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         return Notification.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_relay)
             .setContentTitle(getString(R.string.relay_notification_title))
             .setContentText(getString(R.string.relay_notification_text))
             .setContentIntent(openIntent)
             .setOngoing(true)
-            .addAction(R.drawable.ic_launcher, "Stop", stopIntent)
+            .addAction(R.drawable.ic_stat_relay, "Stop", stopIntent)
             .build()
     }
 
