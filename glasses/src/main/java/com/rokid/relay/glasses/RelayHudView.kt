@@ -212,6 +212,10 @@ class RelayHudView(
     }
 
     private fun renderPopup() {
+        if (replyOk && resultLine.isNotBlank()) {
+            renderSentState()
+            return
+        }
         if (inboxVisible) {
             renderInbox()
             return
@@ -222,8 +226,16 @@ class RelayHudView(
             return
         }
         visibility = VISIBLE
+        alpha = 1f
         hideInboxRows()
         messageLabel.visibility = VISIBLE
+        titleLabel.visibility = VISIBLE
+        titleLabel.gravity = Gravity.START
+        titleLabel.alpha = 1f
+        titleLabel.scaleX = 1f
+        titleLabel.scaleY = 1f
+        titleLabel.translationY = 0f
+        titleLabel.setTextColor(TEXT)
         appLabel.text = model.app.ifBlank { "Message" }
         titleLabel.text = model.title.ifBlank { "Replyable notification" }
         messageLabel.text = model.text.ifBlank { "(no preview)" }
@@ -243,11 +255,33 @@ class RelayHudView(
         }
         hintLabel.text = statusText
         hintLabel.visibility = if (statusText.isBlank()) GONE else VISIBLE
+        hintLabel.alpha = 1f
+        hintLabel.translationY = 0f
         hintLabel.setTextColor(if (voiceState == "idle" && !replyOk) DIM else ACCENT)
+    }
+
+    private fun renderSentState() {
+        visibility = VISIBLE
+        hideInboxRows()
+        appLabel.text = "Rokid Relay"
+        appLabel.visibility = VISIBLE
+        titleLabel.visibility = VISIBLE
+        titleLabel.text = "SENT"
+        titleLabel.gravity = Gravity.CENTER
+        titleLabel.setTextColor(ACCENT)
+        messageLabel.visibility = GONE
+        hintLabel.visibility = GONE
     }
 
     private fun renderInbox() {
         visibility = VISIBLE
+        alpha = 1f
+        titleLabel.gravity = Gravity.START
+        titleLabel.alpha = 1f
+        titleLabel.scaleX = 1f
+        titleLabel.scaleY = 1f
+        titleLabel.translationY = 0f
+        titleLabel.setTextColor(TEXT)
         appLabel.text = "Rokid Relay"
 
         if (inbox.isEmpty()) {
@@ -310,20 +344,21 @@ class RelayHudView(
 
     private fun playSentAnimation() {
         sentAnimator?.cancel()
-        hintLabel.visibility = VISIBLE
-        hintLabel.alpha = 0f
-        hintLabel.translationY = dp(4).toFloat()
-        hintLabel.scaleX = 1f
-        hintLabel.scaleY = 1f
-        hintLabel.text = "SENT"
-        hintLabel.setTextColor(ACCENT)
+        renderSentState()
+        titleLabel.alpha = 0f
+        titleLabel.translationY = dp(5).toFloat()
+        titleLabel.scaleX = 0.92f
+        titleLabel.scaleY = 0.92f
 
-        val hintAlpha = ObjectAnimator.ofFloat(hintLabel, View.ALPHA, 0f, 1f)
-        val hintSlide = ObjectAnimator.ofFloat(hintLabel, View.TRANSLATION_Y, dp(4).toFloat(), 0f)
+        val titleAlpha = ObjectAnimator.ofFloat(titleLabel, View.ALPHA, 0f, 1f)
+        val titleSlide = ObjectAnimator.ofFloat(titleLabel, View.TRANSLATION_Y, dp(5).toFloat(), 0f)
+        val titleScaleX = ObjectAnimator.ofFloat(titleLabel, View.SCALE_X, 0.92f, 1f)
+        val titleScaleY = ObjectAnimator.ofFloat(titleLabel, View.SCALE_Y, 0.92f, 1f)
+        val popupAlpha = ObjectAnimator.ofFloat(this, View.ALPHA, 0.92f, 1f)
         sentAnimator = AnimatorSet().apply {
-            duration = 220L
+            duration = 190L
             interpolator = DecelerateInterpolator()
-            playTogether(hintAlpha, hintSlide)
+            playTogether(titleAlpha, titleSlide, titleScaleX, titleScaleY, popupAlpha)
             start()
         }
     }

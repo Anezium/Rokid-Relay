@@ -27,6 +27,22 @@ object RelayHudController {
     private val views = LinkedHashSet<RelayHudView>()
     private val notificationShownListeners = LinkedHashSet<() -> Unit>()
     private val stateListeners = LinkedHashSet<(State) -> Unit>()
+    private val clearSentResultRunnable = Runnable {
+        update {
+            if (replyOk && voiceState == "idle") {
+                copy(
+                    notification = null,
+                    resultLine = "",
+                    replyOk = false,
+                    voicePartial = "",
+                    transientLine = "",
+                    inboxDetail = if (inboxVisible && inbox.isEmpty()) false else inboxDetail,
+                )
+            } else {
+                this
+            }
+        }
+    }
 
     @Volatile
     private var state = State()
@@ -72,6 +88,7 @@ object RelayHudController {
 
     fun showNotification(model: RelayHudView.NotificationModel) {
         runOnMain {
+            main.removeCallbacks(clearSentResultRunnable)
             val shouldNotify = state.notification?.id != model.id
             state = state.copy(
                 notification = model,
@@ -92,7 +109,8 @@ object RelayHudController {
             val currentNotification = notification
             val nextNotification = if (
                 currentNotification == null ||
-                items.any { it.id == currentNotification.id }
+                items.any { it.id == currentNotification.id } ||
+                (replyOk && resultLine.isNotBlank())
             ) {
                 currentNotification
             } else {
@@ -211,14 +229,18 @@ object RelayHudController {
     }
 
     fun showReplyResult(ok: Boolean, message: String) {
-        update {
-            copy(
+        runOnMain {
+            main.removeCallbacks(clearSentResultRunnable)
+            state = state.copy(
                 resultLine = if (ok) message.ifBlank { "Reply sent" } else message.ifBlank { "Reply failed" },
                 replyOk = ok,
-                replyEventId = replyEventId + 1L,
+                replyEventId = state.replyEventId + 1L,
                 voiceState = "idle",
                 voicePartial = "",
+                transientLine = "",
             )
+            dispatchState()
+            if (ok) main.postDelayed(clearSentResultRunnable, SENT_RESULT_HOLD_MS)
         }
     }
 
@@ -277,4 +299,6 @@ object RelayHudController {
             main.post(block)
         }
     }
+
+    private const val SENT_RESULT_HOLD_MS = 1_250L
 }
