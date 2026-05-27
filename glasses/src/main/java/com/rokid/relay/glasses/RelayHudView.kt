@@ -3,8 +3,12 @@ package com.rokid.relay.glasses
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.content.Context
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.RectF
 import android.graphics.drawable.GradientDrawable
+import android.os.SystemClock
 import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
@@ -30,6 +34,17 @@ class RelayHudView(
     private val titleLabel = label(if (overlayMode) 16f else 24f, TEXT)
     private val messageLabel = label(if (overlayMode) 15f else 20f, TEXT)
     private val hintLabel = label(if (overlayMode) 13f else 17f, DIM)
+    private val countdownRing = CountdownRingView(context)
+    private val reviewLabel = label(if (overlayMode) 13f else 17f, ACCENT)
+    private val reviewRow = LinearLayout(context).apply {
+        orientation = HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        visibility = GONE
+        addView(countdownRing, LinearLayout.LayoutParams(dp(38), dp(38)))
+        addView(reviewLabel, LinearLayout.LayoutParams(0, wrap(), 1f).apply {
+            leftMargin = dp(9)
+        })
+    }
     private val accessibilityLabel = label(16f, ACCENT)
     private val inboxRows = List(3) {
         label(14f, TEXT).apply {
@@ -46,6 +61,8 @@ class RelayHudView(
     private var inboxIndex = 0
     private var voiceState = "idle"
     private var voicePartial = ""
+    private var countdownMs = 0L
+    private var countdownTotalMs = 0L
     private var resultLine = ""
     private var replyOk = false
     private var replyEventId = 0L
@@ -73,6 +90,8 @@ class RelayHudView(
         inboxIndex = state.inboxIndex
         voiceState = state.voiceState
         voicePartial = state.voicePartial
+        countdownMs = state.countdownMs
+        countdownTotalMs = state.countdownTotalMs
         resultLine = state.resultLine
         replyOk = state.replyOk
         replyEventId = state.replyEventId
@@ -94,6 +113,8 @@ class RelayHudView(
         notification = model
         voiceState = "idle"
         voicePartial = ""
+        countdownMs = 0L
+        countdownTotalMs = 0L
         resultLine = ""
         transientLine = ""
         render()
@@ -103,6 +124,8 @@ class RelayHudView(
         notification = null
         voiceState = "idle"
         voicePartial = ""
+        countdownMs = 0L
+        countdownTotalMs = 0L
         resultLine = ""
         transientLine = ""
         render()
@@ -111,6 +134,8 @@ class RelayHudView(
     fun setVoice(state: String, partial: String) {
         voiceState = state.ifBlank { "idle" }
         voicePartial = partial
+        countdownMs = 0L
+        countdownTotalMs = 0L
         transientLine = ""
         render()
     }
@@ -121,6 +146,8 @@ class RelayHudView(
         replyEventId += 1L
         voiceState = "idle"
         voicePartial = ""
+        countdownMs = 0L
+        countdownTotalMs = 0L
         render()
         if (overlayMode && ok) playSentAnimation()
     }
@@ -178,6 +205,7 @@ class RelayHudView(
         addView(appLabel, matchWrap())
         addView(titleLabel, matchWrap(top = 1))
         addView(messageLabel, matchWrap(top = 4))
+        addView(reviewRow, matchWrap(top = 7))
         inboxRows.forEach { row ->
             row.visibility = GONE
             addView(row, matchWrap(top = 5))
@@ -228,6 +256,7 @@ class RelayHudView(
         visibility = VISIBLE
         alpha = 1f
         hideInboxRows()
+        reviewRow.visibility = GONE
         messageLabel.visibility = VISIBLE
         titleLabel.visibility = VISIBLE
         titleLabel.gravity = Gravity.START
@@ -245,6 +274,7 @@ class RelayHudView(
     private fun renderSentState() {
         visibility = VISIBLE
         hideInboxRows()
+        reviewRow.visibility = GONE
         appLabel.text = "Rokid Relay"
         appLabel.visibility = VISIBLE
         titleLabel.visibility = VISIBLE
@@ -264,6 +294,7 @@ class RelayHudView(
         titleLabel.scaleY = 1f
         titleLabel.translationY = 0f
         titleLabel.setTextColor(TEXT)
+        reviewRow.visibility = GONE
         appLabel.text = "Rokid Relay"
 
         if (inbox.isEmpty()) {
@@ -353,16 +384,37 @@ class RelayHudView(
             notificationText.ifBlank { "(no preview)" }
         }
         messageLabel.text = body
+        messageLabel.textSize = if (hasVoiceTranscript) popupVoiceTextSize(body) else if (overlayMode) 15f else 20f
+        messageLabel.setLineSpacing(
+            if (hasVoiceTranscript) dp(1).toFloat() else 0f,
+            if (hasVoiceTranscript) 1.08f else 1.02f,
+        )
         messageLabel.maxLines = if (hasVoiceTranscript) {
             popupVoiceLines(body)
         } else {
             popupMessageLines(notificationText)
         }
-        messageLabel.maxHeight = if (hasVoiceTranscript) dp(178) else dp(96)
+        messageLabel.maxHeight = if (hasVoiceTranscript) popupVoiceMaxHeight(body) else dp(96)
         return hasVoiceTranscript
     }
 
     private fun renderStatus(hasVoiceTranscript: Boolean) {
+        if (voiceState == "reviewing") {
+            val total = countdownTotalMs.takeIf { it > 0L } ?: 1L
+            val remaining = countdownMs.coerceIn(0L, total)
+            val seconds = ((remaining + 999L) / 1000L).coerceAtLeast(1L)
+            reviewRow.visibility = VISIBLE
+            countdownRing.setCountdown(remaining, total)
+            reviewLabel.text = "Sending in ${seconds}s"
+            reviewLabel.setTextColor(ACCENT)
+            hintLabel.text = "OK: retry"
+            hintLabel.visibility = VISIBLE
+            hintLabel.alpha = 1f
+            hintLabel.translationY = 0f
+            hintLabel.setTextColor(DIM)
+            return
+        }
+        reviewRow.visibility = GONE
         val statusText = when (voiceState) {
             "listening" -> "Listening..."
             "recognizing" -> if (hasVoiceTranscript) "" else "Recognizing..."
@@ -379,7 +431,7 @@ class RelayHudView(
 
     private fun activeVoiceTranscript(): String =
         if (
-            (voiceState == "recognizing" || voiceState == "processing") &&
+            (voiceState == "recognizing" || voiceState == "processing" || voiceState == "reviewing") &&
             voicePartial.isNotBlank()
         ) {
             voicePartial.trim()
@@ -390,13 +442,33 @@ class RelayHudView(
     private fun popupVoiceLines(text: String): Int {
         val lineBreaks = text.count { it == '\n' }
         return when {
-            text.length > 280 || lineBreaks >= 5 -> 6
-            text.length > 210 || lineBreaks >= 4 -> 5
-            text.length > 120 || lineBreaks >= 2 -> 4
-            text.length > 60 || lineBreaks >= 1 -> 3
-            else -> 2
+            text.length > 420 || lineBreaks >= 8 -> 11
+            text.length > 320 || lineBreaks >= 6 -> 10
+            text.length > 240 || lineBreaks >= 5 -> 9
+            text.length > 160 || lineBreaks >= 3 -> 8
+            text.length > 90 || lineBreaks >= 2 -> 6
+            text.length > 45 || lineBreaks >= 1 -> 4
+            else -> 3
         }
     }
+
+    private fun popupVoiceMaxHeight(text: String): Int =
+        dp(
+            when {
+                text.length > 420 -> 326
+                text.length > 300 -> 296
+                text.length > 180 -> 252
+                text.length > 90 -> 214
+                else -> 172
+            },
+        )
+
+    private fun popupVoiceTextSize(text: String): Float =
+        when {
+            text.length > 420 -> 13f
+            text.length > 260 -> 14f
+            else -> if (overlayMode) 15f else 20f
+        }
 
     private fun hideInboxRows() {
         inboxRows.forEach { it.visibility = GONE }
@@ -435,6 +507,57 @@ class RelayHudView(
 
     private fun match(): Int = ViewGroup.LayoutParams.MATCH_PARENT
     private fun wrap(): Int = ViewGroup.LayoutParams.WRAP_CONTENT
+
+    private class CountdownRingView(context: Context) : View(context) {
+        private val density = context.resources.displayMetrics.density
+        private val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeCap = Paint.Cap.ROUND
+            strokeWidth = 2.1f * density
+            color = RULE
+        }
+        private val progressPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeCap = Paint.Cap.ROUND
+            strokeWidth = 2.8f * density
+            color = ACCENT
+        }
+        private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = TEXT
+            textAlign = Paint.Align.CENTER
+            textSize = 12f * density
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+        }
+        private val arc = RectF()
+        private var remainingMs = 0L
+        private var totalMs = 1L
+        private var endsAtMs = 0L
+
+        fun setCountdown(remaining: Long, total: Long) {
+            remainingMs = remaining.coerceAtLeast(0L)
+            totalMs = total.coerceAtLeast(1L)
+            endsAtMs = SystemClock.uptimeMillis() + remainingMs
+            invalidate()
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            val inset = progressPaint.strokeWidth / 2f + 1f
+            arc.set(inset, inset, width - inset, height - inset)
+            canvas.drawArc(arc, -90f, 360f, false, trackPaint)
+            val liveRemaining = if (endsAtMs > 0L) {
+                (endsAtMs - SystemClock.uptimeMillis()).coerceAtLeast(0L)
+            } else {
+                remainingMs
+            }
+            val progress = (liveRemaining.toFloat() / totalMs.toFloat()).coerceIn(0f, 1f)
+            canvas.drawArc(arc, -90f, 360f * progress, false, progressPaint)
+            val seconds = ((liveRemaining + 999L) / 1000L).coerceAtLeast(1L).toString()
+            val baseline = height / 2f - (textPaint.descent() + textPaint.ascent()) / 2f
+            canvas.drawText(seconds, width / 2f, baseline, textPaint)
+            if (liveRemaining > 0L) postInvalidateOnAnimation()
+        }
+    }
 
     companion object {
         private val ACCENT = Color.rgb(92, 255, 136)

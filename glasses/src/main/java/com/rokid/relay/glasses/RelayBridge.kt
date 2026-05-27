@@ -41,6 +41,13 @@ object RelayBridge {
             RelayHudController.showTransient("No replyable notification")
             return
         }
+        if (RelayHudController.isVoiceReviewing()) {
+            sendCommand("retry_voice") {
+                put("notificationId", notification)
+            }
+            RelayHudController.setVoice("listening", "")
+            return
+        }
         if (RelayHudController.isVoiceActive()) return
         val now = SystemClock.elapsedRealtime()
         if (now - lastVoiceCommandAtMs < VOICE_COMMAND_DEBOUNCE_MS) return
@@ -135,7 +142,12 @@ object RelayBridge {
                 RelayHudController.setInbox(items)
             }
             "voice_state" -> {
-                RelayHudController.setVoice(obj.optString("state"), obj.optString("partial"))
+                RelayHudController.setVoice(
+                    stateName = obj.optString("state"),
+                    partial = obj.optString("partial"),
+                    countdownMs = obj.optLong("countdownMs", 0L),
+                    countdownTotalMs = obj.optLong("countdownTotalMs", 0L),
+                )
             }
             "reply_result" -> {
                 RelayHudController.showReplyResult(

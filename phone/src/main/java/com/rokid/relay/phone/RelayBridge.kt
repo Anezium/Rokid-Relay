@@ -164,7 +164,12 @@ object RelayBridge {
         )
     }
 
-    fun sendVoiceState(state: String, partial: String = "") {
+    fun sendVoiceState(
+        state: String,
+        partial: String = "",
+        countdownMs: Long = 0L,
+        countdownTotalMs: Long = 0L,
+    ) {
         sendJson(
             Constants.KEY_EVENT,
             JSONObject()
@@ -172,7 +177,9 @@ object RelayBridge {
                 .put("type", "voice_state")
                 .put("source", "phone")
                 .put("state", state)
-                .put("partial", partial),
+                .put("partial", partial)
+                .put("countdownMs", countdownMs)
+                .put("countdownTotalMs", countdownTotalMs),
         )
     }
 
@@ -271,6 +278,15 @@ object RelayBridge {
                     sendReplyResult(id, false, "No active notification")
                 } else {
                     VoiceController.start(context, localLink, id)
+                }
+            }
+            "retry_voice" -> {
+                val id = json.optString("notificationId")
+                val localLink = link
+                if (id.isBlank() || localLink == null) {
+                    sendReplyResult(id, false, "No active notification")
+                } else {
+                    VoiceController.retry(context, localLink, id)
                 }
             }
             "cancel_voice" -> VoiceController.cancel()

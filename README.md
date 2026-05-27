@@ -10,7 +10,7 @@ Rokid Relay is a split Android app for replying to phone notifications from Roki
   - Bundles the debug glasses APK as `assets/rokid-relay-glasses.apk`.
   - Runs a foreground connected-device service while relay mode is active.
   - Uses the glasses microphone through CXR for voice replies, then replies with Android `RemoteInput`.
-  - Supports Android CXR STT, OpenAI completed-audio STT, and ElevenLabs completed-audio STT without a silent phone-mic fallback.
+  - Supports Android CXR STT, OpenAI realtime/completed-audio STT, and ElevenLabs realtime/completed-audio STT without a silent phone-mic fallback.
 - `glasses`: Rokid glasses setup app plus notification popup.
   - Uses CXR-S `CXRServiceBridge`.
   - Shows a black AR-safe setup screen for enabling Accessibility.
@@ -43,7 +43,9 @@ adb -s 1901092534053723 install -r glasses/build/outputs/apk/debug/glasses-debug
 4. Tap `Enable notification access` and enable Rokid Relay.
 5. Pick a speech-to-text engine:
    - `Android CXR`: uses `SpeechRecognizer` with a CXR PCM pipe from the glasses microphone. Requires microphone permission and a microphone foreground-service type.
+   - `OpenAI GPT Realtime Whisper`: streams CXR PCM for live transcript updates.
    - `OpenAI GPT-4o Transcribe` / `GPT-4o mini`: buffers CXR PCM and sends completed audio to OpenAI.
+   - `ElevenLabs Scribe v2 Realtime`: streams CXR PCM for live transcript updates.
    - `ElevenLabs Scribe`: buffers CXR PCM and sends completed audio to ElevenLabs.
 6. Open Rokid Relay on the glasses if it is not already started.
 7. On the glasses app, tap while no notification is shown to open Accessibility settings, then enable `Rokid Relay`.
@@ -68,7 +70,7 @@ After replying from the glasses, the phone app shows `Last sent reply` for the s
 - Phone to glasses: `rokid_relay.event`
 - Glasses to phone: `rokid_relay.command`
 - Payload: first `Caps` slot contains JSON.
-- Key message types: `notification`, `voice_state`, `reply_result`, `start_voice`, `dismiss_notification`, `request_state`.
+- Key message types: `notification`, `voice_state`, `reply_result`, `start_voice`, `retry_voice`, `dismiss_notification`, `request_state`.
 
 Keep logs redacted: do not dump full notification text, auth tokens, API keys, MAC, SN, or socket UUIDs.
 
@@ -76,7 +78,7 @@ Keep logs redacted: do not dump full notification text, auth tokens, API keys, M
 
 `startAudioStream(1)` is treated as the source of truth for glasses voice replies. If the CXR stream is unavailable, Rokid Relay reports the failure instead of silently opening the phone microphone.
 
-The Android engine intentionally uses `RecognizerIntent.EXTRA_AUDIO_SOURCE` with the CXR PCM pipe. The OpenAI and ElevenLabs engines use the same CXR capture path but transcribe a completed WAV buffer.
+The Android engine intentionally uses `RecognizerIntent.EXTRA_AUDIO_SOURCE` with the CXR PCM pipe. OpenAI and ElevenLabs realtime engines stream the same CXR PCM path over WebSocket for partial transcripts; completed-audio engines transcribe a completed WAV buffer. After any engine produces a final transcript, the HUD shows the text and waits a short length-scaled review countdown before sending. Press OK during the countdown to retry the audio capture.
 
 ## CXR-L Global Auth Note
 

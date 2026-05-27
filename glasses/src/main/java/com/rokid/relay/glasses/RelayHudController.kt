@@ -16,6 +16,8 @@ object RelayHudController {
         val inboxIndex: Int = 0,
         val voiceState: String = "idle",
         val voicePartial: String = "",
+        val countdownMs: Long = 0L,
+        val countdownTotalMs: Long = 0L,
         val resultLine: String = "",
         val replyOk: Boolean = false,
         val replyEventId: Long = 0L,
@@ -234,11 +236,18 @@ object RelayHudController {
         }
     }
 
-    fun setVoice(stateName: String, partial: String) {
+    fun setVoice(
+        stateName: String,
+        partial: String,
+        countdownMs: Long = 0L,
+        countdownTotalMs: Long = 0L,
+    ) {
         update {
             copy(
                 voiceState = stateName.ifBlank { "idle" },
                 voicePartial = partial,
+                countdownMs = countdownMs,
+                countdownTotalMs = countdownTotalMs,
                 transientLine = "",
             )
         }
@@ -253,6 +262,8 @@ object RelayHudController {
                 replyEventId = state.replyEventId + 1L,
                 voiceState = "idle",
                 voicePartial = "",
+                countdownMs = 0L,
+                countdownTotalMs = 0L,
                 transientLine = "",
             )
             dispatchState()
@@ -273,7 +284,11 @@ object RelayHudController {
     fun isVoiceActive(): Boolean =
         state.voiceState == "listening" ||
             state.voiceState == "recognizing" ||
-            state.voiceState == "processing"
+            state.voiceState == "processing" ||
+            state.voiceState == "reviewing"
+
+    fun isVoiceReviewing(): Boolean =
+        state.voiceState == "reviewing"
 
     fun currentNotificationId(): String {
         val snapshot = state

@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
+import android.os.SystemClock
 import android.util.Log
 import android.view.Gravity
 import android.view.KeyEvent
@@ -25,13 +26,19 @@ class RelayAccessibilityService : AccessibilityService() {
         if (
             state.voiceState == "listening" ||
             state.voiceState == "recognizing" ||
-            state.voiceState == "processing"
+            state.voiceState == "processing" ||
+            state.voiceState == "reviewing"
         ) {
-            keepReplyScreenOn()
+            val duration = if (state.voiceState == "reviewing" && state.countdownMs > 0L) {
+                (state.countdownMs + REVIEW_WAKE_MARGIN_MS).coerceAtLeast(MIN_REPLY_WAKE_MS)
+            } else {
+                REPLY_WAKE_MS
+            }
+            keepReplyScreenOnThrottled("voice:${state.voiceState}", duration)
         } else if (state.inboxVisible) {
-            keepReplyScreenOn(INBOX_WAKE_MS)
+            keepReplyScreenOnThrottled("inbox", INBOX_WAKE_MS)
         } else if (state.replyOk && state.resultLine.isNotBlank()) {
-            keepReplyScreenOn(POST_REPLY_WAKE_MS)
+            keepReplyScreenOnThrottled("sent:${state.replyEventId}", POST_REPLY_WAKE_MS)
         } else {
             releaseReplyWakeLock()
         }
@@ -41,6 +48,8 @@ class RelayAccessibilityService : AccessibilityService() {
     private var replyWakeLock: PowerManager.WakeLock? = null
     private var audioManager: AudioManager? = null
     private var commandVolume: VolumeSnapshot? = null
+    private var lastReplyWakeSignature = ""
+    private var lastReplyWakeAtMs = 0L
     private var lastComboInputAt = 0L
     private var tapArmed = false
     private val grabbedKeys = HashSet<Int>()
@@ -106,6 +115,15 @@ class RelayAccessibilityService : AccessibilityService() {
             return handleInboxKey(event.keyCode)
         }
 
+        if (RelayHudController.isVoiceReviewing() && relayKey) {
+            if (isConfirmKey(event.keyCode)) {
+                RelayBridge.startVoice()
+            } else if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+                RelayBridge.cancelVoice()
+            }
+            return true
+        }
+
         if (RelayHudController.isVoiceActive() && relayKey) {
             if (isConfirmKey(event.keyCode) || event.keyCode == KeyEvent.KEYCODE_BACK) {
                 RelayBridge.cancelVoice()
@@ -155,6 +173,25 @@ class RelayAccessibilityService : AccessibilityService() {
     }
 
     private fun handleInboxKey(keyCode: Int): Boolean {
+        if (RelayHudController.isVoiceActive()) {
+            return when {
+                RelayHudController.isVoiceReviewing() && isConfirmKey(keyCode) -> {
+                    RelayBridge.startVoice()
+                    true
+                }
+                isConfirmKey(keyCode) -> {
+                    RelayBridge.cancelVoice()
+                    true
+                }
+                keyCode == KeyEvent.KEYCODE_BACK -> {
+                    handleInboxBack()
+                    true
+                }
+                isRelayControlKey(keyCode) -> true
+                else -> false
+            }
+        }
+
         directionFromKey(keyCode)?.let { direction ->
             tapArmed = false
             main.removeCallbacks(singleTapRunnable)
@@ -286,9 +323,9 @@ class RelayAccessibilityService : AccessibilityService() {
             val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
             val view = RelayHudView(this, overlayMode = true)
             val screenWidth = resources.displayMetrics.widthPixels
-            val popupWidth = (screenWidth - dp(48))
-                .coerceAtLeast((screenWidth * 0.72f).toInt())
-                .coerceAtMost((screenWidth * 0.86f).toInt())
+            val popupWidth = (screenWidth - dp(20))
+                .coerceAtLeast((screenWidth * 0.9f).toInt())
+                .coerceAtMost(screenWidth - dp(8))
             val params = WindowManager.LayoutParams(
                 popupWidth,
                 WindowManager.LayoutParams.WRAP_CONTENT,
@@ -355,14 +392,29 @@ class RelayAccessibilityService : AccessibilityService() {
         }
     }
 
+    private fun keepReplyScreenOnThrottled(signature: String, durationMs: Long) {
+        val now = SystemClock.elapsedRealtime()
+        if (signature == lastReplyWakeSignature && now - lastReplyWakeAtMs < REPLY_WAKE_REFRESH_MS) return
+        lastReplyWakeSignature = signature
+        lastReplyWakeAtMs = now
+        keepReplyScreenOn(durationMs)
+    }
+
     private fun releaseReplyWakeLock() {
-        val wakeLock = replyWakeLock ?: return
+        val wakeLock = replyWakeLock
+        if (wakeLock == null) {
+            lastReplyWakeSignature = ""
+            lastReplyWakeAtMs = 0L
+            return
+        }
         runCatching {
             if (wakeLock.isHeld) wakeLock.release()
         }.onFailure {
             Log.w(TAG, "Reply wake lock release failed: ${it.message}")
         }
         replyWakeLock = null
+        lastReplyWakeSignature = ""
+        lastReplyWakeAtMs = 0L
     }
 
     companion object {
@@ -376,7 +428,10 @@ class RelayAccessibilityService : AccessibilityService() {
         private const val COMBO_TIMEOUT_MS = 2_200L
         private const val DOUBLE_TAP_MS = 220L
         private const val NOTIFICATION_WAKE_MS = 5_000L
-        private const val REPLY_WAKE_MS = 60_000L
+        private const val REPLY_WAKE_MS = 35_000L
+        private const val REPLY_WAKE_REFRESH_MS = 12_000L
+        private const val MIN_REPLY_WAKE_MS = 5_000L
+        private const val REVIEW_WAKE_MARGIN_MS = 2_500L
         private const val INBOX_WAKE_MS = 30_000L
         private const val POST_REPLY_WAKE_MS = 4_000L
         private val CONFIRM_KEYS = setOf(

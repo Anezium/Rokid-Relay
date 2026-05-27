@@ -46,6 +46,7 @@ class RelayService : Service() {
     }
 
     override fun onDestroy() {
+        RelayBridge.stop()
         running = false
         if (instance === this) instance = null
         super.onDestroy()

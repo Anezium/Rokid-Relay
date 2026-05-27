@@ -30,12 +30,13 @@ class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
     private val modeButtons = mutableMapOf<SpeechMode, Button>()
     private val providerButtons = mutableMapOf<SpeechToTextProvider, Button>()
-    private val modelButtons = mutableMapOf<SpeechToTextEngine, Button>()
+    private val modelOptionRows = mutableMapOf<SpeechToTextEngine, SttModelOptionRow>()
 
     private lateinit var setupRows: LinearLayout
     private lateinit var noticeText: TextView
     private lateinit var sttSummary: TextView
     private lateinit var apiChoiceContainer: LinearLayout
+    private lateinit var providerHint: TextView
     private lateinit var modelChoiceContainer: LinearLayout
     private lateinit var modelButtonsContainer: LinearLayout
     private lateinit var apiKeysToggleButton: Button
@@ -146,6 +147,8 @@ class MainActivity : Activity() {
                 orientation = LinearLayout.VERTICAL
                 addView(label("API"), matchWrap(top = 14))
                 addView(providerSelector(), matchWrap(top = 8))
+                providerHint = bodyText()
+                addView(providerHint, matchWrap(top = 8))
             }
             addView(apiChoiceContainer, matchWrap())
 
@@ -360,32 +363,20 @@ class MainActivity : Activity() {
     private fun renderModelSelector(provider: SpeechToTextProvider, selected: SpeechToTextEngine) {
         if (!::modelButtonsContainer.isInitialized) return
         modelButtonsContainer.removeAllViews()
-        modelButtons.clear()
-        modelsForProvider(provider).chunked(2).forEachIndexed { rowIndex, engines ->
-            modelButtonsContainer.addView(LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                engines.forEachIndexed { index, engine ->
-                    val button = selectorButton(engine.shortLabel) {
-                        val store = SpeechToTextSettingsStore(this@MainActivity)
-                        if (store.selectedEngine() != engine) {
-                            store.saveSelectedEngine(engine)
-                            autoStartOrAuthorize("stt_model")
-                            renderStatus()
-                        }
-                    }
-                    modelButtons[engine] = button
-                    addView(button, LinearLayout.LayoutParams(0, dp(40), 1f).apply {
-                        if (index > 0) leftMargin = dp(8)
-                    })
+        modelOptionRows.clear()
+        modelsForProvider(provider).forEachIndexed { rowIndex, engine ->
+            val option = SttModelOptionRow(this, engine) { selectedEngine ->
+                val store = SpeechToTextSettingsStore(this@MainActivity)
+                if (store.selectedEngine() != selectedEngine) {
+                    store.saveSelectedEngine(selectedEngine)
+                    autoStartOrAuthorize("stt_model")
+                    renderStatus()
                 }
-                if (engines.size == 1) {
-                    addView(View(this@MainActivity), LinearLayout.LayoutParams(0, dp(40), 1f).apply {
-                        leftMargin = dp(8)
-                    })
-                }
-            }, matchWrap(top = if (rowIndex == 0) 0 else 8))
+            }
+            modelOptionRows[engine] = option
+            modelButtonsContainer.addView(option, matchWrap(top = if (rowIndex == 0) 0 else 8))
         }
-        updateModelButtons(selected)
+        updateModelOptions(selected)
     }
 
     private fun selectorButton(label: String, onClick: () -> Unit): Button =
@@ -633,6 +624,8 @@ class MainActivity : Activity() {
                     "${selectedEngine.displayName}. Add an ElevenLabs key."
                 selectedEngine.requiresMicrophonePermission ->
                     "${selectedEngine.displayName}. Uses glasses PCM through Android recognition."
+                selectedEngine.usesRealtime ->
+                    "${selectedEngine.displayName}. Streams glasses audio for live transcript updates."
                 else ->
                     "${selectedEngine.displayName}. Uses buffered glasses audio."
             }
@@ -687,19 +680,16 @@ class MainActivity : Activity() {
                 strokeWidth = if (isSelected) 2 else 1,
             )
         }
+        if (::providerHint.isInitialized) {
+            providerHint.text = providerDescription(selected.provider)
+        }
         renderModelSelector(selected.provider, selected)
     }
 
-    private fun updateModelButtons(selected: SpeechToTextEngine) {
-        modelButtons.forEach { (engine, button) ->
+    private fun updateModelOptions(selected: SpeechToTextEngine) {
+        modelOptionRows.forEach { (engine, option) ->
             val isSelected = engine == selected
-            button.setTextColor(if (isSelected) COLOR_PHOSPHOR else COLOR_TEXT)
-            button.background = roundedRect(
-                if (isSelected) COLOR_SELECTED else COLOR_FIELD,
-                if (isSelected) COLOR_PHOSPHOR_DIM else COLOR_STROKE,
-                radius = 8,
-                strokeWidth = if (isSelected) 2 else 1,
-            )
+            option.bindSelected(isSelected)
         }
     }
 
@@ -738,21 +728,28 @@ class MainActivity : Activity() {
 
     private fun defaultApiEngine(): SpeechToTextEngine =
         if (!SttCredentialStore(this).apiKey(SpeechToTextCredentialKind.ELEVENLABS).isNullOrBlank()) {
-            SpeechToTextEngine.ELEVENLABS_SCRIBE_V2
+            SpeechToTextEngine.ELEVENLABS_SCRIBE_V2_REALTIME
         } else {
-            SpeechToTextEngine.OPENAI_GPT_4O_TRANSCRIBE
+            SpeechToTextEngine.OPENAI_GPT_REALTIME_WHISPER
         }
 
     private fun defaultEngineForProvider(provider: SpeechToTextProvider): SpeechToTextEngine =
         when (provider) {
-            SpeechToTextProvider.OPENAI -> SpeechToTextEngine.OPENAI_GPT_4O_TRANSCRIBE
-            SpeechToTextProvider.ELEVENLABS -> SpeechToTextEngine.ELEVENLABS_SCRIBE_V2
+            SpeechToTextProvider.OPENAI -> SpeechToTextEngine.OPENAI_GPT_REALTIME_WHISPER
+            SpeechToTextProvider.ELEVENLABS -> SpeechToTextEngine.ELEVENLABS_SCRIBE_V2_REALTIME
             SpeechToTextProvider.ANDROID -> SpeechToTextEngine.ANDROID_CXR
         }
 
     private fun modelsForProvider(provider: SpeechToTextProvider): List<SpeechToTextEngine> =
         SpeechToTextEngine.values()
-            .filter { it.provider == provider && it.usesCompletedAudio }
+            .filter { it.provider == provider && it.usesApiAudio }
+
+    private fun providerDescription(provider: SpeechToTextProvider): String =
+        when (provider) {
+            SpeechToTextProvider.OPENAI -> "OpenAI: strong all-purpose recognition. Good if you already use an OpenAI key."
+            SpeechToTextProvider.ELEVENLABS -> "ElevenLabs: voice-focused recognition with simple realtime and buffered choices."
+            SpeechToTextProvider.ANDROID -> "Android: local phone recognition. No API key, but needs microphone permission."
+        }
 
     private fun buttonBackground(tone: ButtonTone): StateListDrawable {
         val fill: Int

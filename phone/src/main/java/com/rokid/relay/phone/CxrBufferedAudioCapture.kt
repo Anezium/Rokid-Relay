@@ -25,20 +25,26 @@ class CxrBufferedAudioCapture(
     private var audioSourceActive = false
     private var audioFinished = false
     private var lastDiagnosticsAtMs = 0L
+    private var bufferAudio = true
     private var onSpeechStarted: (() -> Unit)? = null
     private var onCaptureFinished: ((CxrCapturedAudio) -> Unit)? = null
     private var onAudioLevel: ((VoiceActivitySnapshot) -> Unit)? = null
+    private var onAudioChunk: ((ByteArray, Int, Int) -> Unit)? = null
     private var onError: ((String) -> Unit)? = null
 
     fun start(
         onSpeechStarted: () -> Unit,
         onCaptureFinished: (CxrCapturedAudio) -> Unit,
+        bufferAudio: Boolean = true,
         onAudioLevel: (VoiceActivitySnapshot) -> Unit = {},
+        onAudioChunk: ((ByteArray, Int, Int) -> Unit)? = null,
         onError: (String) -> Unit,
     ): Boolean {
         this.onSpeechStarted = onSpeechStarted
         this.onCaptureFinished = onCaptureFinished
+        this.bufferAudio = bufferAudio
         this.onAudioLevel = onAudioLevel
+        this.onAudioChunk = onAudioChunk
         this.onError = onError
         return runCatching {
             synchronized(audioLock) {
@@ -78,7 +84,9 @@ class CxrBufferedAudioCapture(
         onSpeechStarted = null
         onCaptureFinished = null
         onAudioLevel = null
+        onAudioChunk = null
         onError = null
+        bufferAudio = true
     }
 
     private val audioCallback = object : IAudioStreamCbk {
@@ -100,12 +108,14 @@ class CxrBufferedAudioCapture(
         if (length <= 0) return
         var voiceStarted = false
         var snapshotForDiagnostics: VoiceActivitySnapshot? = null
+        var streamChunk: ByteArray? = null
+        var streamCallback: ((ByteArray, Int, Int) -> Unit)? = null
         synchronized(audioLock) {
             if (!audioSourceActive || audioFinished) return
             val safeOffset = offset.coerceIn(0, data.size)
             val safeLength = length.coerceAtMost(data.size - safeOffset)
             if (safeLength <= 0) return
-            audioBuffer.write(data, safeOffset, safeLength)
+            if (bufferAudio) audioBuffer.write(data, safeOffset, safeLength)
             val now = SystemClock.elapsedRealtime()
             val hadSpeech = voiceActivityDetector.speechDetected
             val activity = voiceActivityDetector.acceptPcm16Le(data, safeOffset, safeLength, now)
@@ -121,7 +131,10 @@ class CxrBufferedAudioCapture(
                     "CXR audio bytes=$totalBytes level=${activity.averageAbs} peak=${activity.peakAbs} voice=${voiceActivityDetector.speechDetected}",
                 )
             }
+            streamCallback = onAudioChunk
+            if (streamCallback != null) streamChunk = data.copyOfRange(safeOffset, safeOffset + safeLength)
         }
+        streamChunk?.let { chunk -> streamCallback?.invoke(chunk, 0, chunk.size) }
         if (voiceStarted) main.post { onSpeechStarted?.invoke() }
         snapshotForDiagnostics?.let { snapshot -> main.post { onAudioLevel?.invoke(snapshot) } }
     }
@@ -157,7 +170,7 @@ class CxrBufferedAudioCapture(
             audioBuffer.toByteArray()
         }
         stopAudioSource()
-        if (captured.size < MIN_AUDIO_BYTES) {
+        if (bufferAudio && captured.size < MIN_AUDIO_BYTES) {
             main.post { onError?.invoke("No audio captured from glasses") }
             return
         }

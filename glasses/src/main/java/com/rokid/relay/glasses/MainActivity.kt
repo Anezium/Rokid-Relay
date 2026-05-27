@@ -14,7 +14,6 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         requestWindowFeature(Window.FEATURE_NO_TITLE)
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         window.setFlags(
             WindowManager.LayoutParams.FLAG_FULLSCREEN,
             WindowManager.LayoutParams.FLAG_FULLSCREEN,
@@ -51,6 +50,8 @@ class MainActivity : Activity() {
             KeyEvent.KEYCODE_DPAD_CENTER,
             -> {
                 when {
+                    RelayHudController.isVoiceReviewing() -> RelayBridge.startVoice()
+                    RelayHudController.isVoiceActive() -> RelayBridge.cancelVoice()
                     RelayHudController.isInboxDetailOpen() -> RelayBridge.startVoice()
                     RelayHudController.isInboxOpen() -> RelayHudController.openInboxDetail()
                     RelayHudController.hasNotification() -> RelayBridge.dismiss()
@@ -75,6 +76,7 @@ class MainActivity : Activity() {
     }
 
     private fun handleDirection(direction: Direction): Boolean {
+        if (RelayHudController.isVoiceActive()) return true
         if (RelayHudController.isInboxOpen()) {
             RelayHudController.navigateInbox(if (direction == Direction.LEFT) -1 else 1)
             return true
