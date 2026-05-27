@@ -18,6 +18,7 @@ import com.example.cxrglobal.CXRLink
 import com.example.cxrglobal.callbacks.IAudioStreamCbk
 import java.io.FileOutputStream
 import java.io.IOException
+import java.util.Locale
 
 class AndroidCxrSpeechRecognizer(
     private val context: Context,
@@ -244,7 +245,10 @@ class AndroidCxrSpeechRecognizer(
 
             override fun onResults(results: Bundle?) {
                 if (!isActive(owner)) return
-                val text = results.bestRecognizerText().ifBlank { bestPartialTranscript }
+                val text = bestCompleteTranscript(
+                    results.bestRecognizerText(),
+                    bestPartialTranscript,
+                )
                 complete(text, "android-cxr")
             }
 
@@ -252,8 +256,8 @@ class AndroidCxrSpeechRecognizer(
                 if (!isActive(owner)) return
                 val partial = partialResults.bestRecognizerText()
                 if (partial.isNotBlank()) {
-                    bestPartialTranscript = partial
-                    listener.onRecognizing(partial)
+                    bestPartialTranscript = mergeTranscriptWindow(bestPartialTranscript, partial)
+                    listener.onRecognizing(bestPartialTranscript)
                 }
             }
 
@@ -375,6 +379,70 @@ class AndroidCxrSpeechRecognizer(
         return values.firstOrNull { it.isNotBlank() }?.trim().orEmpty()
     }
 
+    private fun bestCompleteTranscript(finalText: String, partialText: String): String {
+        val finalClean = finalText.trim()
+        val partialClean = partialText.trim()
+        if (finalClean.isBlank()) return partialClean
+        if (partialClean.isBlank()) return finalClean
+        val finalWords = normalizedWords(finalClean)
+        val partialWords = normalizedWords(partialClean)
+        return if (
+            partialWords.size > finalWords.size &&
+            containsTokenSequence(partialWords, finalWords)
+        ) {
+            partialClean
+        } else {
+            mergeTranscriptWindow(partialClean, finalClean)
+        }
+    }
+
+    private fun mergeTranscriptWindow(current: String, incoming: String): String {
+        val base = current.trim()
+        val next = incoming.trim()
+        if (base.isBlank()) return next
+        if (next.isBlank()) return base
+
+        val baseWords = normalizedWords(base)
+        val nextWords = normalizedWords(next)
+        if (baseWords.isEmpty() || nextWords.isEmpty()) return "$base $next".trim()
+        if (baseWords == nextWords) return if (next.length > base.length) next else base
+        if (containsTokenSequence(baseWords, nextWords)) return base
+        if (containsTokenSequence(nextWords, baseWords)) return next
+
+        val overlap = longestSuffixPrefixOverlap(baseWords, nextWords)
+        val incomingWords = next.split(WORD_SPLIT_REGEX).filter { it.isNotBlank() }
+        return if (overlap > 0 && overlap < incomingWords.size) {
+            "$base ${incomingWords.drop(overlap).joinToString(" ")}".trim()
+        } else {
+            "$base $next".trim()
+        }
+    }
+
+    private fun normalizedWords(text: String): List<String> =
+        text.split(WORD_SPLIT_REGEX)
+            .map { word ->
+                word.lowercase(Locale.ROOT)
+                    .trim { char -> !char.isLetterOrDigit() }
+            }
+            .filter { it.isNotBlank() }
+
+    private fun containsTokenSequence(haystack: List<String>, needle: List<String>): Boolean {
+        if (needle.isEmpty()) return true
+        if (needle.size > haystack.size) return false
+        for (start in 0..(haystack.size - needle.size)) {
+            if (haystack.subList(start, start + needle.size) == needle) return true
+        }
+        return false
+    }
+
+    private fun longestSuffixPrefixOverlap(left: List<String>, right: List<String>): Int {
+        val max = minOf(left.size, right.size)
+        for (size in max downTo 1) {
+            if (left.takeLast(size) == right.take(size)) return size
+        }
+        return 0
+    }
+
     private fun Int.toVoiceMessage(): String =
         when (this) {
             SpeechRecognizer.ERROR_NO_MATCH -> "No speech recognized"
@@ -401,5 +469,6 @@ class AndroidCxrSpeechRecognizer(
         const val DIAGNOSTICS_UPDATE_MS = 500L
         const val VAD_CHECK_INTERVAL_MS = 120L
         const val FINAL_RESULT_TIMEOUT_MS = 2_500L
+        val WORD_SPLIT_REGEX = Regex("\\s+")
     }
 }

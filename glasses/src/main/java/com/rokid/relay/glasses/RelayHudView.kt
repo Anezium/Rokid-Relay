@@ -238,26 +238,8 @@ class RelayHudView(
         titleLabel.setTextColor(TEXT)
         appLabel.text = model.app.ifBlank { "Message" }
         titleLabel.text = model.title.ifBlank { "Replyable notification" }
-        messageLabel.text = model.text.ifBlank { "(no preview)" }
-        messageLabel.maxLines = popupMessageLines(model.text)
-        val statusText = when (voiceState) {
-            "listening" -> "Listening..."
-            "recognizing" -> voicePartial.ifBlank { "Recognizing..." }
-            "processing" -> voicePartial.ifBlank { "Processing..." }
-            "error" -> "Voice error"
-            else -> {
-                if (replyOk && resultLine.isNotBlank()) {
-                    "SENT"
-                } else {
-                    resultLine
-                }
-            }
-        }
-        hintLabel.text = statusText
-        hintLabel.visibility = if (statusText.isBlank()) GONE else VISIBLE
-        hintLabel.alpha = 1f
-        hintLabel.translationY = 0f
-        hintLabel.setTextColor(if (voiceState == "idle" && !replyOk) DIM else ACCENT)
+        val hasVoiceTranscript = renderMessageBody(model.text)
+        renderStatus(hasVoiceTranscript)
     }
 
     private fun renderSentState() {
@@ -302,18 +284,8 @@ class RelayHudView(
             messageLabel.visibility = VISIBLE
             appLabel.text = selected.app.ifBlank { "Message" }
             titleLabel.text = selected.title.ifBlank { "Replyable notification" }
-            messageLabel.text = selected.text.ifBlank { "(no preview)" }
-            messageLabel.maxLines = popupMessageLines(selected.text)
-            val statusText = when (voiceState) {
-                "listening" -> "Listening..."
-                "recognizing" -> voicePartial.ifBlank { "Recognizing..." }
-                "processing" -> voicePartial.ifBlank { "Processing..." }
-                "error" -> "Voice error"
-                else -> if (replyOk && resultLine.isNotBlank()) "SENT" else resultLine
-            }
-            hintLabel.text = statusText
-            hintLabel.visibility = if (statusText.isBlank()) GONE else VISIBLE
-            hintLabel.setTextColor(if (voiceState == "idle" && !replyOk) DIM else ACCENT)
+            val hasVoiceTranscript = renderMessageBody(selected.text)
+            renderStatus(hasVoiceTranscript)
             return
         }
 
@@ -368,6 +340,60 @@ class RelayHudView(
         return when {
             text.length > 180 || lineBreaks >= 3 -> 4
             text.length > 90 || lineBreaks >= 1 -> 3
+            else -> 2
+        }
+    }
+
+    private fun renderMessageBody(notificationText: String): Boolean {
+        val transcript = activeVoiceTranscript()
+        val hasVoiceTranscript = transcript.isNotBlank()
+        val body = if (hasVoiceTranscript) {
+            transcript
+        } else {
+            notificationText.ifBlank { "(no preview)" }
+        }
+        messageLabel.text = body
+        messageLabel.maxLines = if (hasVoiceTranscript) {
+            popupVoiceLines(body)
+        } else {
+            popupMessageLines(notificationText)
+        }
+        messageLabel.maxHeight = if (hasVoiceTranscript) dp(178) else dp(96)
+        return hasVoiceTranscript
+    }
+
+    private fun renderStatus(hasVoiceTranscript: Boolean) {
+        val statusText = when (voiceState) {
+            "listening" -> "Listening..."
+            "recognizing" -> if (hasVoiceTranscript) "" else "Recognizing..."
+            "processing" -> "Processing..."
+            "error" -> "Voice error"
+            else -> if (replyOk && resultLine.isNotBlank()) "SENT" else resultLine
+        }
+        hintLabel.text = statusText
+        hintLabel.visibility = if (statusText.isBlank()) GONE else VISIBLE
+        hintLabel.alpha = 1f
+        hintLabel.translationY = 0f
+        hintLabel.setTextColor(if (voiceState == "idle" && !replyOk) DIM else ACCENT)
+    }
+
+    private fun activeVoiceTranscript(): String =
+        if (
+            (voiceState == "recognizing" || voiceState == "processing") &&
+            voicePartial.isNotBlank()
+        ) {
+            voicePartial.trim()
+        } else {
+            ""
+        }
+
+    private fun popupVoiceLines(text: String): Int {
+        val lineBreaks = text.count { it == '\n' }
+        return when {
+            text.length > 280 || lineBreaks >= 5 -> 6
+            text.length > 210 || lineBreaks >= 4 -> 5
+            text.length > 120 || lineBreaks >= 2 -> 4
+            text.length > 60 || lineBreaks >= 1 -> 3
             else -> 2
         }
     }
