@@ -49,7 +49,7 @@ adb -s 1901092534053723 install -r glasses/build/outputs/apk/debug/glasses-debug
 7. On the glasses app, tap while no notification is shown to open Accessibility settings, then enable `Rokid Relay`.
 
 When the glasses Accessibility service is enabled, Rokid Relay uses `TYPE_ACCESSIBILITY_OVERLAY` only for a small replyable-notification popup. The setup app is just for connection/accessibility status and opening Android Accessibility settings.
-The phone relay starts automatically when the phone app opens or when Android delivers the configured autostart events after authorization.
+The phone relay starts automatically when the phone app opens or when Android delivers the configured autostart events after authorization. If no Hi Rokid token is stored, opening the phone app automatically launches the Hi Rokid authorization screen once; after approval, Relay stores the returned token and starts the service.
 
 ## Test Notification
 

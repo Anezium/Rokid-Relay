@@ -38,6 +38,10 @@ class MainActivity : Activity() {
     private lateinit var engineSpinner: Spinner
     private lateinit var openAiKeyInput: EditText
     private lateinit var elevenLabsKeyInput: EditText
+    private var runtimePermissionRequestInFlight = false
+    private var authRequestInFlight = false
+    private var autoAuthAttempted = false
+    private var autoReauthAttempted = false
 
     private val pollStatus = object : Runnable {
         override fun run() {
@@ -54,7 +58,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        RelayStarter.startIfReady(this, "app_open")
+        if (!runtimePermissionRequestInFlight) autoStartOrAuthorize("app_open")
         renderStatus()
         handler.post(pollStatus)
     }
@@ -66,7 +70,8 @@ class MainActivity : Activity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        RelayStarter.startIfReady(this, "permissions")
+        runtimePermissionRequestInFlight = false
+        autoStartOrAuthorize("permissions")
         RelayService.refreshForeground()
         renderStatus()
     }
@@ -75,10 +80,12 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != Constants.AUTH_REQUEST_CODE) return
+        authRequestInFlight = false
 
         val notice = when (val result = CxrLAuth.parseAuthorizationResult(resultCode, data)) {
             is CxrLAuth.Result.Success -> {
                 prefs().edit().putString(Constants.PREF_AUTH_TOKEN, result.token).apply()
+                autoReauthAttempted = false
                 RelayStarter.start(this, result.token, "authorization")
                 null
             }
@@ -143,14 +150,7 @@ class MainActivity : Activity() {
                 renderStatus()
             })
             addView(actionButton("Authorize Hi Rokid", ButtonTone.Secondary) {
-                if (!CxrLAuth.isGlobalHiRokidInstalled(this@MainActivity)) {
-                    toastLine("Hi Rokid Global is not visible to Rokid Relay")
-                } else {
-                    val error = CxrLAuth.requestAuthorization(this@MainActivity, Constants.AUTH_REQUEST_CODE)
-                    if (error is CxrLAuth.Result.Fail) {
-                        toastLine("Authorization failed to open: ${error.reason}")
-                    }
-                }
+                requestHiRokidAuthorization(auto = false, reason = "manual")
             })
             addView(actionButton("Notification access", ButtonTone.Secondary) {
                 startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
@@ -204,7 +204,7 @@ class MainActivity : Activity() {
                         if (store.selectedEngine() == engine) return
                         store.saveSelectedEngine(engine)
                         if (engine.requiresMicrophonePermission) requestMicrophonePermissionIfNeeded()
-                        RelayStarter.startIfReady(this@MainActivity, "stt_engine")
+                        autoStartOrAuthorize("stt_engine")
                         renderStatus()
                     }
 
@@ -315,7 +315,7 @@ class MainActivity : Activity() {
 
             addView(actionButton("Grant microphone permission", ButtonTone.Secondary) {
                 requestMicrophonePermissionIfNeeded()
-                RelayStarter.startIfReady(this@MainActivity, "microphone_permission")
+                autoStartOrAuthorize("microphone_permission")
                 renderStatus()
             })
         })
@@ -386,6 +386,7 @@ class MainActivity : Activity() {
         val elevenLabsLabel = stt.accountLabel(SpeechToTextCredentialKind.ELEVENLABS)
         val sttReady = sttReady(selectedEngine, stt)
         val micPermissionGranted = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        maybeAutoReauthorizeAfterBindFailure(snap, authSaved)
 
         if (::engineSpinner.isInitialized) {
             val index = sttEngines.indexOf(selectedEngine).coerceAtLeast(0)
@@ -578,7 +579,42 @@ class MainActivity : Activity() {
             wanted += Manifest.permission.POST_NOTIFICATIONS
         }
         val missing = wanted.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
-        if (missing.isNotEmpty()) requestPermissions(missing.toTypedArray(), 42)
+        if (missing.isNotEmpty()) {
+            runtimePermissionRequestInFlight = true
+            requestPermissions(missing.toTypedArray(), 42)
+        }
+    }
+
+    private fun autoStartOrAuthorize(reason: String) {
+        if (RelayStarter.startIfReady(this, reason)) return
+        if (!autoAuthAttempted) {
+            autoAuthAttempted = true
+            requestHiRokidAuthorization(auto = true, reason = reason)
+        }
+    }
+
+    private fun maybeAutoReauthorizeAfterBindFailure(snap: RelayBridge.Snapshot, authSaved: Boolean) {
+        if (!authSaved || autoReauthAttempted || authRequestInFlight) return
+        if (!RelayService.running || snap.cxrConnected) return
+        if (snap.lastStatus != "Hi Rokid bind failed") return
+        autoReauthAttempted = true
+        requestHiRokidAuthorization(auto = true, reason = "bind_failed")
+    }
+
+    private fun requestHiRokidAuthorization(auto: Boolean, reason: String) {
+        if (authRequestInFlight) return
+        if (!CxrLAuth.isGlobalHiRokidInstalled(this)) {
+            toastLine("Hi Rokid Global is not visible to Rokid Relay")
+            return
+        }
+        authRequestInFlight = true
+        RelayBridge.setStatus(if (auto) "opening Hi Rokid authorization" else "authorization requested")
+        val error = CxrLAuth.requestAuthorization(this, Constants.AUTH_REQUEST_CODE)
+        if (error is CxrLAuth.Result.Fail) {
+            authRequestInFlight = false
+            toastLine("Authorization failed to open: ${error.reason}")
+            RelayBridge.setStatus("authorization failed to open: $reason")
+        }
     }
 
     private fun requestMicrophonePermissionIfNeeded() {
