@@ -102,6 +102,15 @@ class MainActivity : Activity() {
         super.onPause()
     }
 
+    @Deprecated("Use legacy Activity back handling because this app does not use AndroidX")
+    override fun onBackPressed() {
+        if (selectedTab != AppTab.HOME) {
+            selectTab(AppTab.HOME)
+            return
+        }
+        super.onBackPressed()
+    }
+
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         runtimePermissionRequestInFlight = false
