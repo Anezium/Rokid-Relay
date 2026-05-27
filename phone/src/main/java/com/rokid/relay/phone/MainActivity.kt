@@ -20,28 +20,44 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
-import android.widget.AdapterView
-import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import android.widget.Spinner
 import android.widget.TextView
 
 class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
-    private val sttEngines = SpeechToTextEngine.values().toList()
-    private lateinit var statusList: LinearLayout
-    private lateinit var activityText: TextView
+    private val modeButtons = mutableMapOf<SpeechMode, Button>()
+    private val providerButtons = mutableMapOf<SpeechToTextProvider, Button>()
+    private val modelButtons = mutableMapOf<SpeechToTextEngine, Button>()
+
+    private lateinit var setupRows: LinearLayout
+    private lateinit var noticeText: TextView
     private lateinit var sttSummary: TextView
-    private lateinit var engineSpinner: Spinner
+    private lateinit var apiChoiceContainer: LinearLayout
+    private lateinit var modelChoiceContainer: LinearLayout
+    private lateinit var modelButtonsContainer: LinearLayout
+    private lateinit var apiKeysToggleButton: Button
+    private lateinit var apiKeysContainer: LinearLayout
+    private lateinit var openAiKeyBlock: LinearLayout
+    private lateinit var elevenLabsKeyBlock: LinearLayout
     private lateinit var openAiKeyInput: EditText
     private lateinit var elevenLabsKeyInput: EditText
+    private lateinit var openAiKeyMeta: TextView
+    private lateinit var elevenLabsKeyMeta: TextView
+    private lateinit var diagnosticsToggleButton: Button
+    private lateinit var diagnosticsContainer: LinearLayout
+    private lateinit var activityText: TextView
+
     private var runtimePermissionRequestInFlight = false
     private var authRequestInFlight = false
     private var autoAuthAttempted = false
     private var autoReauthAttempted = false
+    private var openAiKeyVisible = false
+    private var elevenLabsKeyVisible = false
+    private var apiKeysVisible = false
+    private var diagnosticsVisible = false
 
     private val pollStatus = object : Runnable {
         override fun run() {
@@ -87,80 +103,112 @@ class MainActivity : Activity() {
                 prefs().edit().putString(Constants.PREF_AUTH_TOKEN, result.token).apply()
                 autoReauthAttempted = false
                 RelayStarter.start(this, result.token, "authorization")
-                null
+                "Hi Rokid authorized"
             }
             is CxrLAuth.Result.Fail -> "Authorization failed: ${result.reason}"
             is CxrLAuth.Result.Cancel -> "Authorization cancelled"
         }
         renderStatus()
-        notice?.let(::toastLine)
+        toastLine(notice)
     }
 
     private fun buildContent(): ScrollView {
-        val horizontalPadding = dp(20)
-        val topPadding = dp(18)
-        val bottomPadding = dp(24)
+        val horizontalPadding = dp(18)
+        val topPadding = dp(16)
+        val bottomPadding = dp(22)
+
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(horizontalPadding, topPadding, horizontalPadding, bottomPadding)
             applySystemBarPadding(horizontalPadding, topPadding, horizontalPadding, bottomPadding)
         }
 
-        root.addView(TextView(this).apply {
-            text = "Rokid Relay"
-            textSize = 30f
-            typeface = Typeface.DEFAULT_BOLD
-            includeFontPadding = false
-            setTextColor(COLOR_TEXT)
-        }, matchWrap())
-        root.addView(TextView(this).apply {
-            text = "Phone notifications, glasses overlay, voice replies"
-            textSize = 14f
-            includeFontPadding = false
-            setTextColor(COLOR_MUTED)
-            setPadding(0, dp(6), 0, dp(4))
-        }, matchWrap())
+        root.addView(header(), matchWrap())
 
-        root.addView(section("Relay status") {
-            statusList = LinearLayout(this@MainActivity).apply {
+        root.addView(panel("Setup") {
+            setupRows = LinearLayout(this@MainActivity).apply {
                 orientation = LinearLayout.VERTICAL
             }
-            addView(statusList, matchWrap(top = 2))
-            addView(rule(), matchWrap(top = 12))
-            addView(TextView(this@MainActivity).apply {
-                text = "Last activity"
-                textSize = 12f
-                typeface = Typeface.DEFAULT_BOLD
-                includeFontPadding = false
-                setTextColor(COLOR_MUTED)
-                setPadding(0, dp(12), 0, dp(6))
-            }, matchWrap())
-            activityText = TextView(this@MainActivity).apply {
-                textSize = 13f
-                includeFontPadding = false
-                setLineSpacing(dp(2).toFloat(), 1f)
-                setTextColor(COLOR_TEXT)
+            addView(setupRows, matchWrap())
+            noticeText = bodyText().apply {
+                setPadding(0, dp(12), 0, 0)
             }
-            addView(activityText, matchWrap())
+            addView(noticeText, matchWrap())
         })
 
-        root.addView(section("Controls") {
-            addView(actionButton("Stop relay", ButtonTone.Danger) {
-                RelayStarter.stop(this@MainActivity)
+        root.addView(panel("Speech") {
+            sttSummary = bodyText()
+            addView(sttSummary, matchWrap())
+            addView(label("Engine"), matchWrap(top = 14))
+            addView(modeSelector(), matchWrap(top = 8))
+
+            apiChoiceContainer = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(label("API"), matchWrap(top = 14))
+                addView(providerSelector(), matchWrap(top = 8))
+            }
+            addView(apiChoiceContainer, matchWrap())
+
+            modelChoiceContainer = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(label("Model"), matchWrap(top = 14))
+                modelButtonsContainer = LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                }
+                addView(modelButtonsContainer, matchWrap(top = 8))
+            }
+            addView(modelChoiceContainer, matchWrap())
+
+            apiKeysToggleButton = textButton("Manage API keys") {
+                apiKeysVisible = !apiKeysVisible
                 renderStatus()
-            })
-            addView(actionButton("Authorize Hi Rokid", ButtonTone.Secondary) {
-                requestHiRokidAuthorization(auto = false, reason = "manual")
-            })
-            addView(actionButton("Notification access", ButtonTone.Secondary) {
-                startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-            })
-            addView(buttonRow(
-                actionButton("Test notification", ButtonTone.Secondary) {
+            }
+            addView(apiKeysToggleButton, matchWrap(top = 12))
+
+            apiKeysContainer = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                visibility = View.GONE
+            }
+            openAiKeyBlock = apiKeyBlock(
+                title = "OpenAI",
+                hint = "sk-...",
+                kind = SpeechToTextCredentialKind.OPENAI,
+                isVisible = { openAiKeyVisible },
+                setVisible = { openAiKeyVisible = it },
+                setInput = { openAiKeyInput = it },
+                setMeta = { openAiKeyMeta = it },
+            )
+            elevenLabsKeyBlock = apiKeyBlock(
+                title = "ElevenLabs",
+                hint = "xi-...",
+                kind = SpeechToTextCredentialKind.ELEVENLABS,
+                isVisible = { elevenLabsKeyVisible },
+                setVisible = { elevenLabsKeyVisible = it },
+                setInput = { elevenLabsKeyInput = it },
+                setMeta = { elevenLabsKeyMeta = it },
+            )
+            apiKeysContainer.addView(openAiKeyBlock, matchWrap(top = 12))
+            apiKeysContainer.addView(elevenLabsKeyBlock, matchWrap(top = 12))
+            addView(apiKeysContainer, matchWrap())
+        })
+
+        root.addView(panel("Diagnostics") {
+            diagnosticsToggleButton = textButton("Show diagnostics") {
+                diagnosticsVisible = !diagnosticsVisible
+                updateDiagnosticsVisibility()
+            }
+            addView(diagnosticsToggleButton, matchWrap(top = 12))
+
+            diagnosticsContainer = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                visibility = View.GONE
+            }
+            diagnosticsContainer.addView(buttonRow(
+                smallButton("Test notification", ButtonTone.Secondary) {
                     TestNotificationReceiver.postTestNotification(this@MainActivity)
                     renderStatus()
                 },
-                actionButton("Long test", ButtonTone.Secondary) {
+                smallButton("Long test", ButtonTone.Secondary) {
                     TestNotificationReceiver.postTestNotification(
                         this@MainActivity,
                         "Long message de test pour Rokid Relay. Il doit rester lisible sur les lunettes sans prendre tout l'ecran: " +
@@ -169,155 +217,15 @@ class MainActivity : Activity() {
                     )
                     renderStatus()
                 },
-            ))
-        })
-
-        root.addView(section("Speech to text") {
-            addView(TextView(this@MainActivity).apply {
-                text = "Engine"
-                textSize = 13f
-                typeface = Typeface.DEFAULT_BOLD
-                includeFontPadding = false
-                setTextColor(COLOR_TEXT)
-            }, matchWrap())
-            sttSummary = TextView(this@MainActivity).apply {
-                textSize = 13f
-                includeFontPadding = false
-                setTextColor(COLOR_MUTED)
-                setPadding(0, dp(6), 0, dp(8))
-            }
-            addView(sttSummary, matchWrap())
-            engineSpinner = Spinner(this@MainActivity).apply {
-                adapter = ArrayAdapter(
-                    this@MainActivity,
-                    android.R.layout.simple_spinner_item,
-                    sttEngines.map { it.displayName },
-                ).also {
-                    it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-                }
-                background = inputBackground()
-                minimumHeight = dp(48)
-                onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-                    override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                        val engine = sttEngines.getOrNull(position) ?: return
-                        val store = SpeechToTextSettingsStore(this@MainActivity)
-                        if (store.selectedEngine() == engine) return
-                        store.saveSelectedEngine(engine)
-                        if (engine.requiresMicrophonePermission) requestMicrophonePermissionIfNeeded()
-                        autoStartOrAuthorize("stt_engine")
-                        renderStatus()
-                    }
-
-                    override fun onNothingSelected(parent: AdapterView<*>?) = Unit
-                }
-            }
-            addView(engineSpinner, matchWrap(top = 2))
-
-            addView(TextView(this@MainActivity).apply {
-                text = "OpenAI API key"
-                textSize = 13f
-                typeface = Typeface.DEFAULT_BOLD
-                includeFontPadding = false
-                setTextColor(COLOR_TEXT)
-                setPadding(0, dp(14), 0, 0)
-            }, matchWrap())
-            openAiKeyInput = EditText(this@MainActivity).apply {
-                hint = "sk-..."
-                textSize = 15f
-                setSingleLine(true)
-                includeFontPadding = false
-                setTextColor(COLOR_TEXT)
-                setHintTextColor(COLOR_MUTED)
+            ), matchWrap(top = 10))
+            diagnosticsContainer.addView(rule(), matchWrap(top = 14))
+            diagnosticsContainer.addView(label("Last activity"), matchWrap(top = 12))
+            activityText = bodyText().apply {
                 typeface = Typeface.MONOSPACE
-                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-                setSelectAllOnFocus(true)
-                setPadding(dp(12), 0, dp(12), 0)
-                minHeight = dp(48)
-                background = inputBackground()
+                textSize = 12f
             }
-            addView(openAiKeyInput, matchWrap(top = 2))
-            addView(buttonRow(
-                actionButton("Save OpenAI", ButtonTone.Primary) {
-                    val notice = runCatching {
-                        SttCredentialStore(this@MainActivity).saveApiKey(
-                            SpeechToTextCredentialKind.OPENAI,
-                            openAiKeyInput.text.toString(),
-                        )
-                    }.fold(
-                        onSuccess = {
-                            openAiKeyInput.text.clear()
-                            "OpenAI STT key saved"
-                        },
-                        onFailure = {
-                            "Failed to save STT key: ${it.message}"
-                        },
-                    )
-                    renderStatus()
-                    toastLine(notice)
-                },
-                actionButton("Clear OpenAI", ButtonTone.Secondary) {
-                    SttCredentialStore(this@MainActivity).clearApiKey(SpeechToTextCredentialKind.OPENAI)
-                    openAiKeyInput.text.clear()
-                    renderStatus()
-                    toastLine("OpenAI STT key cleared")
-                },
-            ))
-
-            addView(TextView(this@MainActivity).apply {
-                text = "ElevenLabs API key"
-                textSize = 13f
-                typeface = Typeface.DEFAULT_BOLD
-                includeFontPadding = false
-                setTextColor(COLOR_TEXT)
-                setPadding(0, dp(14), 0, 0)
-            }, matchWrap())
-            elevenLabsKeyInput = EditText(this@MainActivity).apply {
-                hint = "xi-..."
-                textSize = 15f
-                setSingleLine(true)
-                includeFontPadding = false
-                setTextColor(COLOR_TEXT)
-                setHintTextColor(COLOR_MUTED)
-                typeface = Typeface.MONOSPACE
-                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-                setSelectAllOnFocus(true)
-                setPadding(dp(12), 0, dp(12), 0)
-                minHeight = dp(48)
-                background = inputBackground()
-            }
-            addView(elevenLabsKeyInput, matchWrap(top = 2))
-            addView(buttonRow(
-                actionButton("Save ElevenLabs", ButtonTone.Primary) {
-                    val notice = runCatching {
-                        SttCredentialStore(this@MainActivity).saveApiKey(
-                            SpeechToTextCredentialKind.ELEVENLABS,
-                            elevenLabsKeyInput.text.toString(),
-                        )
-                    }.fold(
-                        onSuccess = {
-                            elevenLabsKeyInput.text.clear()
-                            "ElevenLabs STT key saved"
-                        },
-                        onFailure = {
-                            "Failed to save STT key: ${it.message}"
-                        },
-                    )
-                    renderStatus()
-                    toastLine(notice)
-                },
-                actionButton("Clear ElevenLabs", ButtonTone.Secondary) {
-                    SttCredentialStore(this@MainActivity).clearApiKey(SpeechToTextCredentialKind.ELEVENLABS)
-                    elevenLabsKeyInput.text.clear()
-                    renderStatus()
-                    toastLine("ElevenLabs STT key cleared")
-                },
-            ))
-
-            addView(actionButton("Grant microphone permission", ButtonTone.Secondary) {
-                requestMicrophonePermissionIfNeeded()
-                autoStartOrAuthorize("microphone_permission")
-                renderStatus()
-            })
+            diagnosticsContainer.addView(activityText, matchWrap(top = 8))
+            addView(diagnosticsContainer, matchWrap())
         })
 
         return ScrollView(this).apply {
@@ -327,39 +235,251 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun section(title: String, build: LinearLayout.() -> Unit): LinearLayout =
+    private fun header(): LinearLayout =
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(14), dp(16), dp(16))
-            background = roundedRect(COLOR_PANEL, COLOR_STROKE, radius = 8)
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(6), 0, dp(4))
             addView(TextView(this@MainActivity).apply {
-                text = title
-                textSize = 17f
+                text = "Rokid Relay"
+                textSize = 24f
                 typeface = Typeface.DEFAULT_BOLD
                 includeFontPadding = false
                 setTextColor(COLOR_TEXT)
-                setPadding(0, 0, 0, dp(10))
             }, matchWrap())
-            build()
-            layoutParams = matchWrap(top = 14)
         }
 
-    private fun actionButton(label: String, tone: ButtonTone, onClick: () -> Unit): Button =
+    private fun panel(title: String, build: LinearLayout.() -> Unit): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(12), dp(14), dp(14))
+            background = roundedRect(COLOR_PANEL, COLOR_STROKE, radius = 10)
+            addView(TextView(this@MainActivity).apply {
+                text = title
+                textSize = 15f
+                typeface = Typeface.DEFAULT_BOLD
+                includeFontPadding = false
+                setTextColor(COLOR_TEXT)
+            }, matchWrap())
+            build()
+            layoutParams = matchWrap(top = 12)
+        }
+
+    private fun setupRow(
+        title: String,
+        value: String,
+        tone: StatusTone,
+        actionLabel: String,
+        actionTone: ButtonTone,
+        onClick: () -> Unit,
+    ): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = dp(46)
+            addView(View(this@MainActivity).apply {
+                background = dot(statusColor(tone))
+            }, LinearLayout.LayoutParams(dp(8), dp(8)))
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(TextView(this@MainActivity).apply {
+                    text = title
+                    textSize = 13f
+                    typeface = Typeface.DEFAULT_BOLD
+                    includeFontPadding = false
+                    setTextColor(COLOR_TEXT)
+                    maxLines = 1
+                    ellipsize = TextUtils.TruncateAt.END
+                }, matchWrap())
+                addView(TextView(this@MainActivity).apply {
+                    text = value
+                    textSize = 12f
+                    includeFontPadding = false
+                    setTextColor(statusColor(tone))
+                    maxLines = 1
+                    ellipsize = TextUtils.TruncateAt.END
+                }, matchWrap(top = 4))
+            }, LinearLayout.LayoutParams(0, wrap(), 1f).apply {
+                leftMargin = dp(10)
+                rightMargin = dp(10)
+            })
+            addView(smallButton(actionLabel, actionTone, onClick), LinearLayout.LayoutParams(dp(112), dp(38)))
+        }
+
+    private fun modeSelector(): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            modeButtons.clear()
+            SpeechMode.values().forEachIndexed { index, mode ->
+                val button = selectorButton(mode.label) {
+                    val store = SpeechToTextSettingsStore(this@MainActivity)
+                    val current = store.selectedEngine()
+                    val next = when (mode) {
+                        SpeechMode.ANDROID -> SpeechToTextEngine.ANDROID_CXR
+                        SpeechMode.API -> if (current.provider == SpeechToTextProvider.ANDROID) {
+                            defaultApiEngine()
+                        } else {
+                            current
+                        }
+                    }
+                    if (store.selectedEngine() != next) {
+                        store.saveSelectedEngine(next)
+                        if (next.requiresMicrophonePermission) requestMicrophonePermissionIfNeeded()
+                        autoStartOrAuthorize("stt_engine")
+                        renderStatus()
+                    }
+                }
+                modeButtons[mode] = button
+                addView(button, LinearLayout.LayoutParams(0, dp(40), 1f).apply {
+                    if (index > 0) leftMargin = dp(8)
+                })
+            }
+        }
+
+    private fun providerSelector(): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            providerButtons.clear()
+            listOf(SpeechToTextProvider.OPENAI, SpeechToTextProvider.ELEVENLABS).forEachIndexed { index, provider ->
+                val button = selectorButton(provider.displayName) {
+                    val next = defaultEngineForProvider(provider)
+                    val store = SpeechToTextSettingsStore(this@MainActivity)
+                    if (store.selectedEngine() != next) {
+                        store.saveSelectedEngine(next)
+                        autoStartOrAuthorize("stt_provider")
+                        renderStatus()
+                    }
+                }
+                providerButtons[provider] = button
+                addView(button, LinearLayout.LayoutParams(0, dp(40), 1f).apply {
+                    if (index > 0) leftMargin = dp(8)
+                })
+            }
+        }
+
+    private fun renderModelSelector(provider: SpeechToTextProvider, selected: SpeechToTextEngine) {
+        if (!::modelButtonsContainer.isInitialized) return
+        modelButtonsContainer.removeAllViews()
+        modelButtons.clear()
+        modelsForProvider(provider).chunked(2).forEachIndexed { rowIndex, engines ->
+            modelButtonsContainer.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                engines.forEachIndexed { index, engine ->
+                    val button = selectorButton(engine.shortLabel) {
+                        val store = SpeechToTextSettingsStore(this@MainActivity)
+                        if (store.selectedEngine() != engine) {
+                            store.saveSelectedEngine(engine)
+                            autoStartOrAuthorize("stt_model")
+                            renderStatus()
+                        }
+                    }
+                    modelButtons[engine] = button
+                    addView(button, LinearLayout.LayoutParams(0, dp(40), 1f).apply {
+                        if (index > 0) leftMargin = dp(8)
+                    })
+                }
+                if (engines.size == 1) {
+                    addView(View(this@MainActivity), LinearLayout.LayoutParams(0, dp(40), 1f).apply {
+                        leftMargin = dp(8)
+                    })
+                }
+            }, matchWrap(top = if (rowIndex == 0) 0 else 8))
+        }
+        updateModelButtons(selected)
+    }
+
+    private fun selectorButton(label: String, onClick: () -> Unit): Button =
         Button(this).apply {
             text = label
-            textSize = 14f
+            textSize = 13f
             typeface = Typeface.DEFAULT_BOLD
             includeFontPadding = false
             isAllCaps = false
-            minHeight = dp(48)
-            gravity = Gravity.CENTER
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(12), 0, dp(12), 0)
-            setTextColor(buttonTextColor(tone))
-            background = buttonBackground(tone)
+            minimumHeight = dp(40)
             stateListAnimator = null
             elevation = 0f
+            background = roundedRect(COLOR_FIELD, COLOR_STROKE, radius = 8)
+            setTextColor(COLOR_TEXT)
             setOnClickListener { onClick() }
-            layoutParams = matchWrap(top = 10)
+        }
+
+    private fun apiKeyBlock(
+        title: String,
+        hint: String,
+        kind: SpeechToTextCredentialKind,
+        isVisible: () -> Boolean,
+        setVisible: (Boolean) -> Unit,
+        setInput: (EditText) -> Unit,
+        setMeta: (TextView) -> Unit,
+    ): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(label("$title API key"), LinearLayout.LayoutParams(0, wrap(), 1f))
+                val meta = TextView(this@MainActivity).apply {
+                    textSize = 12f
+                    includeFontPadding = false
+                    setTextColor(COLOR_MUTED)
+                    gravity = Gravity.END
+                }
+                setMeta(meta)
+                addView(meta, LinearLayout.LayoutParams(0, wrap(), 1f))
+            }, matchWrap())
+
+            val input = keyInput(hint)
+            setInput(input)
+            setApiKeyVisibility(input, isVisible())
+
+            lateinit var toggle: Button
+            toggle = smallButton(if (isVisible()) "Hide" else "Show", ButtonTone.Secondary) {
+                setVisible(!isVisible())
+                setApiKeyVisibility(input, isVisible())
+                toggle.text = if (isVisible()) "Hide" else "Show"
+            }
+
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(input, LinearLayout.LayoutParams(0, dp(42), 1f))
+                addView(toggle, LinearLayout.LayoutParams(dp(82), dp(42)).apply {
+                    leftMargin = dp(8)
+                })
+            }, matchWrap(top = 8))
+
+            val provider = when (kind) {
+                SpeechToTextCredentialKind.OPENAI -> "OpenAI"
+                SpeechToTextCredentialKind.ELEVENLABS -> "ElevenLabs"
+                SpeechToTextCredentialKind.NONE -> "STT"
+            }
+            addView(buttonRow(
+                smallButton("Save", ButtonTone.Primary) {
+                    val notice = runCatching {
+                        SttCredentialStore(this@MainActivity).saveApiKey(kind, input.text.toString())
+                    }.fold(
+                        onSuccess = {
+                            input.text.clear()
+                            "$provider key saved"
+                        },
+                        onFailure = {
+                            "Failed to save $provider key: ${it.message}"
+                        },
+                    )
+                    renderStatus()
+                    toastLine(notice)
+                },
+                smallButton("Clear", ButtonTone.Secondary) {
+                    SttCredentialStore(this@MainActivity).clearApiKey(kind)
+                    input.text.clear()
+                    renderStatus()
+                    toastLine("$provider key cleared")
+                },
+            ), matchWrap(top = 8))
         }
 
     private fun buttonRow(vararg buttons: Button): LinearLayout =
@@ -367,20 +487,80 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
             buttons.forEachIndexed { index, button ->
-                addView(button, LinearLayout.LayoutParams(0, dp(48), 1f).apply {
-                    if (index > 0) leftMargin = dp(10)
+                addView(button, LinearLayout.LayoutParams(0, dp(40), 1f).apply {
+                    if (index > 0) leftMargin = dp(8)
                 })
             }
-            layoutParams = matchWrap(top = 10)
         }
+
+    private fun smallButton(label: String, tone: ButtonTone, onClick: () -> Unit): Button =
+        Button(this).apply {
+            text = label
+            textSize = 12f
+            typeface = Typeface.DEFAULT_BOLD
+            includeFontPadding = false
+            isAllCaps = false
+            gravity = Gravity.CENTER
+            setPadding(dp(8), 0, dp(8), 0)
+            setTextColor(buttonTextColor(tone))
+            background = buttonBackground(tone)
+            stateListAnimator = null
+            elevation = 0f
+            setOnClickListener { onClick() }
+        }
+
+    private fun textButton(label: String, onClick: () -> Unit): Button =
+        smallButton(label, ButtonTone.Secondary, onClick)
+
+    private fun label(text: String): TextView =
+        TextView(this).apply {
+            this.text = text
+            textSize = 11f
+            typeface = Typeface.DEFAULT_BOLD
+            includeFontPadding = false
+            setTextColor(COLOR_MUTED)
+        }
+
+    private fun bodyText(): TextView =
+        TextView(this).apply {
+            textSize = 12.5f
+            includeFontPadding = false
+            setLineSpacing(dp(2).toFloat(), 1f)
+            setTextColor(COLOR_MUTED)
+        }
+
+    private fun keyInput(hintText: String): EditText =
+        EditText(this).apply {
+            hint = hintText
+            textSize = 14f
+            setSingleLine(true)
+            includeFontPadding = false
+            setTextColor(COLOR_TEXT)
+            setHintTextColor(COLOR_DIM)
+            typeface = Typeface.MONOSPACE
+            setSelectAllOnFocus(true)
+            setPadding(dp(10), 0, dp(10), 0)
+            minimumHeight = dp(42)
+            background = inputBackground()
+        }
+
+    private fun setApiKeyVisibility(input: EditText, visible: Boolean) {
+        input.inputType = InputType.TYPE_CLASS_TEXT or if (visible) {
+            InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+        } else {
+            InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        input.typeface = Typeface.MONOSPACE
+        input.setSingleLine(true)
+        input.setSelection(input.text.length)
+    }
 
     private fun renderStatus() {
         val snap = RelayBridge.snapshot()
         val hiRokid = CxrLAuth.isGlobalHiRokidInstalled(this)
         val notifications = notificationAccessEnabled()
         val authSaved = !savedToken().isNullOrBlank()
-        val sttSettings = SpeechToTextSettingsStore(this)
-        val selectedEngine = sttSettings.selectedEngine()
+        val selectedEngine = SpeechToTextSettingsStore(this).selectedEngine()
         val stt = SttCredentialStore(this)
         val openAiLabel = stt.accountLabel(SpeechToTextCredentialKind.OPENAI)
         val elevenLabsLabel = stt.accountLabel(SpeechToTextCredentialKind.ELEVENLABS)
@@ -388,57 +568,89 @@ class MainActivity : Activity() {
         val micPermissionGranted = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         maybeAutoReauthorizeAfterBindFailure(snap, authSaved)
 
-        if (::engineSpinner.isInitialized) {
-            val index = sttEngines.indexOf(selectedEngine).coerceAtLeast(0)
-            if (engineSpinner.selectedItemPosition != index) {
-                engineSpinner.setSelection(index, false)
+        if (::setupRows.isInitialized) {
+            setupRows.removeAllViews()
+            setupRows.addView(setupRow(
+                title = "Hi Rokid",
+                value = if (hiRokid) "Installed" else "Not visible",
+                tone = if (hiRokid) StatusTone.Ready else StatusTone.Waiting,
+                actionLabel = "Authorize",
+                actionTone = if (authSaved) ButtonTone.Secondary else ButtonTone.Primary,
+                onClick = { requestHiRokidAuthorization(auto = false, reason = "manual") },
+            ))
+            setupRows.addView(setupRow(
+                title = "Notification access",
+                value = if (notifications) "Enabled" else "Disabled",
+                tone = if (notifications) StatusTone.Ready else StatusTone.Waiting,
+                actionLabel = "Open",
+                actionTone = ButtonTone.Secondary,
+                onClick = { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
+            ), matchWrap(top = 8))
+            setupRows.addView(setupRow(
+                title = "Microphone",
+                value = if (micPermissionGranted) "Granted" else "Needed for Android CXR",
+                tone = if (micPermissionGranted) StatusTone.Ready else StatusTone.Waiting,
+                actionLabel = "Grant",
+                actionTone = ButtonTone.Secondary,
+                onClick = {
+                    requestMicrophonePermissionIfNeeded()
+                    autoStartOrAuthorize("microphone_permission")
+                    renderStatus()
+                },
+            ), matchWrap(top = 8))
+            setupRows.addView(setupRow(
+                title = "Relay service",
+                value = if (RelayService.running) "Forwarding notifications" else "Stopped",
+                tone = if (RelayService.running) StatusTone.Ready else StatusTone.Neutral,
+                actionLabel = "Stop",
+                actionTone = ButtonTone.Danger,
+                onClick = {
+                    RelayStarter.stop(this)
+                    renderStatus()
+                },
+            ), matchWrap(top = 8))
+        }
+
+        if (::noticeText.isInitialized) {
+            noticeText.text = when {
+                !hiRokid -> "Install or expose Hi Rokid Global first."
+                !authSaved -> "Authorize once, then the relay can start automatically."
+                !notifications -> "Notification access is still required."
+                !sttReady -> "Finish speech-to-text setup for voice replies."
+                RelayService.running -> "Ready. Replyable notifications will forward to the glasses."
+                else -> "Ready to start."
             }
+            noticeText.setTextColor(if (hiRokid && authSaved && notifications && sttReady) COLOR_PHOSPHOR else COLOR_MUTED)
         }
 
         if (::sttSummary.isInitialized) {
-            sttSummary.text = buildString {
-                append(selectedEngine.displayName)
-                append(" selected. ")
-                append(
-                    when {
-                        selectedEngine.requiresMicrophonePermission && !micPermissionGranted ->
-                            "Microphone permission is needed for Android CXR."
-                        selectedEngine.credentialKind == SpeechToTextCredentialKind.OPENAI && openAiLabel.isNullOrBlank() ->
-                            "OpenAI key missing."
-                        selectedEngine.credentialKind == SpeechToTextCredentialKind.ELEVENLABS && elevenLabsLabel.isNullOrBlank() ->
-                            "ElevenLabs key missing."
-                        selectedEngine.requiresMicrophonePermission ->
-                            "Uses glasses PCM through Android SpeechRecognizer."
-                        else ->
-                            "Uses buffered glasses PCM, no phone-mic fallback."
-                    },
-                )
+            sttSummary.text = when {
+                selectedEngine.requiresMicrophonePermission && !micPermissionGranted ->
+                    "${selectedEngine.displayName}. Microphone permission required."
+                selectedEngine.credentialKind == SpeechToTextCredentialKind.OPENAI && openAiLabel.isNullOrBlank() ->
+                    "${selectedEngine.displayName}. Add an OpenAI key."
+                selectedEngine.credentialKind == SpeechToTextCredentialKind.ELEVENLABS && elevenLabsLabel.isNullOrBlank() ->
+                    "${selectedEngine.displayName}. Add an ElevenLabs key."
+                selectedEngine.requiresMicrophonePermission ->
+                    "${selectedEngine.displayName}. Uses glasses PCM through Android recognition."
+                else ->
+                    "${selectedEngine.displayName}. Uses buffered glasses audio."
             }
-            sttSummary.setTextColor(if (sttReady) COLOR_PHOSPHOR_DARK else COLOR_MUTED)
+            sttSummary.setTextColor(if (sttReady) COLOR_TEXT else COLOR_MUTED)
         }
 
-        if (::statusList.isInitialized) {
-            setStatusRows(
-                listOf(
-                    StatusLine("Hi Rokid", if (hiRokid) "Installed" else "Not ready", if (hiRokid) StatusTone.Ready else StatusTone.Waiting),
-                    StatusLine("Authorization", if (authSaved) "Saved" else "Missing", if (authSaved) StatusTone.Ready else StatusTone.Waiting),
-                    StatusLine("Notifications", if (notifications) "Enabled" else "Disabled", if (notifications) StatusTone.Ready else StatusTone.Waiting),
-                    StatusLine("STT engine", selectedEngine.shortLabel, StatusTone.Neutral),
-                    StatusLine("Speech to text", if (sttReady) "Ready" else sttMissingReason(selectedEngine, stt), if (sttReady) StatusTone.Ready else StatusTone.Waiting),
-                    StatusLine("Mic foreground", if (RelayService.microphoneForegroundActive) "Active" else "Off", if (RelayService.microphoneForegroundActive) StatusTone.Ready else StatusTone.Neutral),
-                    StatusLine("Relay service", if (RelayService.running) "Running" else "Stopped", if (RelayService.running) StatusTone.Ready else StatusTone.Neutral),
-                    StatusLine("CXR-L", if (snap.cxrConnected) "Connected" else "Disconnected", if (snap.cxrConnected) StatusTone.Ready else StatusTone.Waiting),
-                    StatusLine("Glasses BT", if (snap.glassConnected) "Connected" else "Waiting", if (snap.glassConnected) StatusTone.Ready else StatusTone.Waiting),
-                    StatusLine("Glasses app", snap.bootstrapState, StatusTone.Neutral),
-                ),
-            )
-        }
+        updateSpeechChoiceButtons(selectedEngine)
+        updateApiKeys(selectedEngine, openAiLabel, elevenLabsLabel)
 
         if (::activityText.isInitialized) {
             activityText.setTextColor(COLOR_TEXT)
             activityText.text = buildString {
                 appendLine("Event: ${snap.lastStatus}")
                 appendLine("Voice: ${snap.voiceRoute} / ${snap.sttEngine}")
+                appendLine("CXR-L: ${if (snap.cxrConnected) "connected" else "disconnected"}")
+                appendLine("Glasses BT: ${if (snap.glassConnected) "connected" else "waiting"}")
+                appendLine("Glasses app: ${snap.bootstrapState}")
+                appendLine("Mic foreground: ${if (RelayService.microphoneForegroundActive) "active" else "off"}")
                 appendLine("CXR audio: ${displayBytes(snap.cxrAudioBytes)} avg=${snap.vadAverageAbs} peak=${snap.vadPeakAbs} speech=${snap.vadSpeechDetected}")
                 if (snap.lastVoiceError.isNotBlank()) appendLine("Voice error: ${snap.lastVoiceError}")
                 appendLine("Sent: ${displayMessage(snap.lastOutgoingReply)}")
@@ -447,83 +659,141 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun setStatusRows(rows: List<StatusLine>) {
-        statusList.removeAllViews()
-        rows.forEachIndexed { index, row ->
-            statusList.addView(statusRow(row), matchWrap(top = if (index == 0) 0 else 8))
+    private fun updateSpeechChoiceButtons(selected: SpeechToTextEngine) {
+        val mode = if (selected.provider == SpeechToTextProvider.ANDROID) SpeechMode.ANDROID else SpeechMode.API
+        modeButtons.forEach { (itemMode, button) ->
+            val isSelected = itemMode == mode
+            button.setTextColor(if (isSelected) COLOR_PHOSPHOR else COLOR_TEXT)
+            button.background = roundedRect(
+                if (isSelected) COLOR_SELECTED else COLOR_FIELD,
+                if (isSelected) COLOR_PHOSPHOR_DIM else COLOR_STROKE,
+                radius = 8,
+                strokeWidth = if (isSelected) 2 else 1,
+            )
+        }
+
+        val apiVisible = mode == SpeechMode.API
+        if (::apiChoiceContainer.isInitialized) apiChoiceContainer.visibility = if (apiVisible) View.VISIBLE else View.GONE
+        if (::modelChoiceContainer.isInitialized) modelChoiceContainer.visibility = if (apiVisible) View.VISIBLE else View.GONE
+        if (!apiVisible) return
+
+        providerButtons.forEach { (provider, button) ->
+            val isSelected = provider == selected.provider
+            button.setTextColor(if (isSelected) COLOR_PHOSPHOR else COLOR_TEXT)
+            button.background = roundedRect(
+                if (isSelected) COLOR_SELECTED else COLOR_FIELD,
+                if (isSelected) COLOR_PHOSPHOR_DIM else COLOR_STROKE,
+                radius = 8,
+                strokeWidth = if (isSelected) 2 else 1,
+            )
+        }
+        renderModelSelector(selected.provider, selected)
+    }
+
+    private fun updateModelButtons(selected: SpeechToTextEngine) {
+        modelButtons.forEach { (engine, button) ->
+            val isSelected = engine == selected
+            button.setTextColor(if (isSelected) COLOR_PHOSPHOR else COLOR_TEXT)
+            button.background = roundedRect(
+                if (isSelected) COLOR_SELECTED else COLOR_FIELD,
+                if (isSelected) COLOR_PHOSPHOR_DIM else COLOR_STROKE,
+                radius = 8,
+                strokeWidth = if (isSelected) 2 else 1,
+            )
         }
     }
 
-    private fun statusRow(row: StatusLine): LinearLayout =
-        LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            minimumHeight = dp(26)
-            addView(View(this@MainActivity).apply {
-                background = dot(statusColor(row.tone))
-            }, LinearLayout.LayoutParams(dp(8), dp(8)))
-            addView(TextView(this@MainActivity).apply {
-                text = row.label
-                textSize = 13f
-                includeFontPadding = false
-                setTextColor(COLOR_MUTED)
-                maxLines = 1
-                ellipsize = TextUtils.TruncateAt.END
-            }, LinearLayout.LayoutParams(0, wrap(), 1f).apply {
-                leftMargin = dp(10)
-                rightMargin = dp(12)
-            })
-            addView(TextView(this@MainActivity).apply {
-                text = row.value
-                textSize = 13f
-                typeface = Typeface.DEFAULT_BOLD
-                includeFontPadding = false
-                setTextColor(statusColor(row.tone))
-                maxLines = 1
-                ellipsize = TextUtils.TruncateAt.END
-                gravity = Gravity.END
-            }, LinearLayout.LayoutParams(0, wrap(), 0.95f))
+    private fun updateApiKeys(
+        selectedEngine: SpeechToTextEngine,
+        openAiLabel: String?,
+        elevenLabsLabel: String?,
+    ) {
+        val selectedOpenAi = selectedEngine.credentialKind == SpeechToTextCredentialKind.OPENAI
+        val selectedElevenLabs = selectedEngine.credentialKind == SpeechToTextCredentialKind.ELEVENLABS
+        val apiSelected = selectedOpenAi || selectedElevenLabs
+        val forceOpen = (selectedOpenAi && openAiLabel.isNullOrBlank()) ||
+            (selectedElevenLabs && elevenLabsLabel.isNullOrBlank())
+        val showKeys = apiKeysVisible || forceOpen
+
+        apiKeysToggleButton.visibility = if (apiSelected) View.VISIBLE else View.GONE
+        apiKeysContainer.visibility = if (apiSelected && showKeys) View.VISIBLE else View.GONE
+        apiKeysToggleButton.text = if (showKeys && apiKeysVisible) "Hide API keys" else "Manage API keys"
+
+        openAiKeyBlock.visibility = if (apiKeysVisible || selectedOpenAi) View.VISIBLE else View.GONE
+        elevenLabsKeyBlock.visibility = if (apiKeysVisible || selectedElevenLabs) View.VISIBLE else View.GONE
+
+        openAiKeyMeta.text = openAiLabel ?: "not saved"
+        openAiKeyMeta.setTextColor(if (openAiLabel.isNullOrBlank()) COLOR_MUTED else COLOR_PHOSPHOR)
+        elevenLabsKeyMeta.text = elevenLabsLabel ?: "not saved"
+        elevenLabsKeyMeta.setTextColor(if (elevenLabsLabel.isNullOrBlank()) COLOR_MUTED else COLOR_PHOSPHOR)
+    }
+
+    private fun updateDiagnosticsVisibility() {
+        if (!::diagnosticsContainer.isInitialized) return
+        diagnosticsContainer.visibility = if (diagnosticsVisible) View.VISIBLE else View.GONE
+        if (::diagnosticsToggleButton.isInitialized) {
+            diagnosticsToggleButton.text = if (diagnosticsVisible) "Hide diagnostics" else "Show diagnostics"
+        }
+    }
+
+    private fun defaultApiEngine(): SpeechToTextEngine =
+        if (!SttCredentialStore(this).apiKey(SpeechToTextCredentialKind.ELEVENLABS).isNullOrBlank()) {
+            SpeechToTextEngine.ELEVENLABS_SCRIBE_V2
+        } else {
+            SpeechToTextEngine.OPENAI_GPT_4O_TRANSCRIBE
         }
 
+    private fun defaultEngineForProvider(provider: SpeechToTextProvider): SpeechToTextEngine =
+        when (provider) {
+            SpeechToTextProvider.OPENAI -> SpeechToTextEngine.OPENAI_GPT_4O_TRANSCRIBE
+            SpeechToTextProvider.ELEVENLABS -> SpeechToTextEngine.ELEVENLABS_SCRIBE_V2
+            SpeechToTextProvider.ANDROID -> SpeechToTextEngine.ANDROID_CXR
+        }
+
+    private fun modelsForProvider(provider: SpeechToTextProvider): List<SpeechToTextEngine> =
+        SpeechToTextEngine.values()
+            .filter { it.provider == provider && it.usesCompletedAudio }
+
     private fun buttonBackground(tone: ButtonTone): StateListDrawable {
-        val defaultFill: Int
-        val pressedFill: Int
+        val fill: Int
+        val pressed: Int
         val stroke: Int
         when (tone) {
             ButtonTone.Primary -> {
-                defaultFill = COLOR_PHOSPHOR
-                pressedFill = COLOR_PHOSPHOR_SOFT
-                stroke = COLOR_PHOSPHOR_DARK
+                fill = COLOR_ACTION
+                pressed = COLOR_ACTION_PRESSED
+                stroke = COLOR_PHOSPHOR_DIM
             }
             ButtonTone.Secondary -> {
-                defaultFill = COLOR_PANEL
-                pressedFill = COLOR_PHOSPHOR_WASH
+                fill = COLOR_FIELD
+                pressed = COLOR_PANEL_ALT
                 stroke = COLOR_STROKE
             }
             ButtonTone.Danger -> {
-                defaultFill = COLOR_ALERT_WASH
-                pressedFill = COLOR_PANEL
-                stroke = COLOR_ALERT
+                fill = COLOR_DANGER_BG
+                pressed = COLOR_DANGER_PRESSED
+                stroke = COLOR_DANGER
             }
         }
         return StateListDrawable().apply {
             addState(intArrayOf(-android.R.attr.state_enabled), roundedRect(COLOR_DISABLED, COLOR_STROKE, radius = 8))
-            addState(intArrayOf(android.R.attr.state_pressed), roundedRect(pressedFill, stroke, radius = 8))
-            addState(intArrayOf(android.R.attr.state_focused), roundedRect(pressedFill, COLOR_PHOSPHOR_DARK, radius = 8, strokeWidth = 2))
-            addState(intArrayOf(), roundedRect(defaultFill, stroke, radius = 8))
+            addState(intArrayOf(android.R.attr.state_pressed), roundedRect(pressed, stroke, radius = 8))
+            addState(intArrayOf(android.R.attr.state_focused), roundedRect(pressed, COLOR_PHOSPHOR, radius = 8, strokeWidth = 2))
+            addState(intArrayOf(), roundedRect(fill, stroke, radius = 8))
         }
     }
 
     private fun buttonTextColor(tone: ButtonTone): Int =
         when (tone) {
-            ButtonTone.Danger -> COLOR_ALERT
-            else -> COLOR_TEXT
+            ButtonTone.Primary -> COLOR_PHOSPHOR
+            ButtonTone.Danger -> COLOR_DANGER
+            ButtonTone.Secondary -> COLOR_TEXT
         }
 
     private fun inputBackground(): StateListDrawable =
         StateListDrawable().apply {
-            addState(intArrayOf(android.R.attr.state_focused), roundedRect(COLOR_PANEL, COLOR_PHOSPHOR_DARK, radius = 8, strokeWidth = 2))
-            addState(intArrayOf(), roundedRect(COLOR_PANEL, COLOR_STROKE, radius = 8))
+            addState(intArrayOf(android.R.attr.state_focused), roundedRect(COLOR_FIELD, COLOR_PHOSPHOR_DIM, radius = 8, strokeWidth = 2))
+            addState(intArrayOf(), roundedRect(COLOR_FIELD, COLOR_STROKE, radius = 8))
         }
 
     private fun roundedRect(color: Int, strokeColor: Int, radius: Int, strokeWidth: Int = 1): GradientDrawable =
@@ -547,7 +817,7 @@ class MainActivity : Activity() {
 
     private fun statusColor(tone: StatusTone): Int =
         when (tone) {
-            StatusTone.Ready -> COLOR_PHOSPHOR_DARK
+            StatusTone.Ready -> COLOR_PHOSPHOR
             StatusTone.Waiting -> COLOR_AMBER
             StatusTone.Neutral -> COLOR_MUTED
         }
@@ -631,16 +901,6 @@ class MainActivity : Activity() {
             else -> true
         }
 
-    private fun sttMissingReason(engine: SpeechToTextEngine, store: SttCredentialStore): String =
-        when {
-            engine.requiresMicrophonePermission &&
-                checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED ->
-                "Mic permission"
-            engine.requiresCredential && !store.hasCredential(engine) ->
-                "${engine.provider.displayName} key"
-            else -> "Not ready"
-        }
-
     private fun notificationAccessEnabled(): Boolean {
         val enabled = Settings.Secure.getString(
             contentResolver,
@@ -655,8 +915,12 @@ class MainActivity : Activity() {
     private fun prefs() = getSharedPreferences(Constants.PREFS, Context.MODE_PRIVATE)
 
     private fun toastLine(text: String) {
+        if (::noticeText.isInitialized) {
+            noticeText.setTextColor(COLOR_PHOSPHOR)
+            noticeText.text = text
+        }
         if (::activityText.isInitialized) {
-            activityText.setTextColor(COLOR_ALERT)
+            activityText.setTextColor(COLOR_DANGER)
             activityText.text = text
         }
     }
@@ -683,12 +947,6 @@ class MainActivity : Activity() {
 
     private fun wrap(): Int = ViewGroup.LayoutParams.WRAP_CONTENT
 
-    private data class StatusLine(
-        val label: String,
-        val value: String,
-        val tone: StatusTone,
-    )
-
     private enum class StatusTone {
         Ready,
         Waiting,
@@ -701,19 +959,29 @@ class MainActivity : Activity() {
         Danger,
     }
 
+    private enum class SpeechMode(val label: String) {
+        ANDROID("Android"),
+        API("API"),
+    }
+
     private companion object {
-        val COLOR_APP_BG: Int = Color.rgb(244, 249, 241)
-        val COLOR_PANEL: Int = Color.rgb(250, 253, 247)
-        val COLOR_DISABLED: Int = Color.rgb(230, 237, 227)
-        val COLOR_PHOSPHOR_WASH: Int = Color.rgb(229, 248, 232)
-        val COLOR_PHOSPHOR_SOFT: Int = Color.rgb(185, 244, 199)
-        val COLOR_PHOSPHOR: Int = Color.rgb(82, 238, 122)
-        val COLOR_PHOSPHOR_DARK: Int = Color.rgb(29, 135, 68)
-        val COLOR_STROKE: Int = Color.rgb(184, 211, 191)
-        val COLOR_TEXT: Int = Color.rgb(12, 30, 20)
-        val COLOR_MUTED: Int = Color.rgb(77, 98, 84)
-        val COLOR_AMBER: Int = Color.rgb(131, 96, 39)
-        val COLOR_ALERT: Int = Color.rgb(148, 56, 52)
-        val COLOR_ALERT_WASH: Int = Color.rgb(252, 238, 235)
+        val COLOR_APP_BG: Int = Color.rgb(4, 10, 6)
+        val COLOR_PANEL: Int = Color.rgb(8, 18, 11)
+        val COLOR_PANEL_ALT: Int = Color.rgb(11, 29, 16)
+        val COLOR_FIELD: Int = Color.rgb(5, 13, 8)
+        val COLOR_SELECTED: Int = Color.rgb(10, 35, 18)
+        val COLOR_DISABLED: Int = Color.rgb(16, 24, 18)
+        val COLOR_ACTION: Int = Color.rgb(12, 44, 22)
+        val COLOR_ACTION_PRESSED: Int = Color.rgb(17, 61, 31)
+        val COLOR_PHOSPHOR: Int = Color.rgb(113, 255, 151)
+        val COLOR_PHOSPHOR_DIM: Int = Color.rgb(42, 122, 62)
+        val COLOR_STROKE: Int = Color.rgb(24, 67, 36)
+        val COLOR_TEXT: Int = Color.rgb(224, 255, 232)
+        val COLOR_MUTED: Int = Color.rgb(132, 178, 145)
+        val COLOR_DIM: Int = Color.rgb(76, 111, 86)
+        val COLOR_AMBER: Int = Color.rgb(230, 190, 92)
+        val COLOR_DANGER: Int = Color.rgb(255, 134, 123)
+        val COLOR_DANGER_BG: Int = Color.rgb(37, 16, 15)
+        val COLOR_DANGER_PRESSED: Int = Color.rgb(52, 23, 21)
     }
 }

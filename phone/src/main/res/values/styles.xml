@@ -1,9 +1,9 @@
 <resources>
-    <style name="Theme.RokidRelay.Phone" parent="@android:style/Theme.Material.Light.NoActionBar">
+    <style name="Theme.RokidRelay.Phone" parent="@android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
-        <item name="android:windowLightStatusBar">true</item>
-        <item name="android:navigationBarColor">#07120B</item>
-        <item name="android:statusBarColor">#F4F9F1</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:navigationBarColor">#030C06</item>
+        <item name="android:statusBarColor">#030C06</item>
         <item name="android:windowLightNavigationBar">false</item>
     </style>
 </resources>
