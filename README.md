@@ -132,6 +132,8 @@ Rokid Relay has two speech modes.
 
 API engines use the same glasses microphone audio, but send it to the selected provider.
 
+Use an API engine when you want better recognition quality than the Android speech recognizer, or when the phone's local recognizer is unreliable with the glasses PCM route. This requires internet access and sends the captured reply audio to the selected provider.
+
 OpenAI engines:
 
 - `OpenAI GPT Realtime Whisper`: realtime transcript updates while speaking.
@@ -144,20 +146,26 @@ ElevenLabs engines:
 - `ElevenLabs Scribe v2`: buffered audio, balanced option.
 - `ElevenLabs Scribe v1`: legacy buffered option.
 
+As of 2026-05-27, ElevenLabs lists a Free plan with 10k credits per month. On the current ElevenLabs API pricing table, that is roughly enough for about 4 hours 30 minutes of buffered Scribe v1/v2 speech-to-text, or about 2 hours 30 minutes of Scribe v2 Realtime. Check the [live ElevenLabs pricing page](https://elevenlabs.io/pricing) before relying on those numbers for heavy usage.
+
 ### API keys
 
 To add or change keys:
 
-1. Open the phone app.
-2. In `Speech`, select `API`.
-3. Select `OpenAI` or `ElevenLabs`.
-4. Tap `Manage API keys`.
-5. Paste the key into the provider field.
-6. Tap `Save`.
+1. Create an API key in the provider dashboard:
+   - OpenAI: use the [OpenAI API keys page](https://platform.openai.com/settings/organization/api-keys) in the OpenAI platform.
+   - ElevenLabs: create an API key from the ElevenLabs dashboard or Developers/API Keys area. ElevenLabs' [API authentication docs](https://elevenlabs.io/docs/api-reference/quick-start/authentication) also describe `xi-api-key` authentication.
+2. Open the Rokid Relay phone app.
+3. In `Speech`, select `API`.
+4. Select `OpenAI` or `ElevenLabs`.
+5. Select the model you want to use.
+6. Tap `Manage API keys`.
+7. Paste the key into the provider field.
+8. Tap `Save`.
 
 OpenAI keys normally start with `sk-...`. ElevenLabs keys normally start with `xi-...`.
 
-Keys are stored on the phone in app preferences encrypted with Android Keystore AES-GCM. The README, Gradle files, and `local.properties` should never contain OpenAI or ElevenLabs keys. Use `Clear` in the phone app to remove a saved key.
+Keys are stored on the phone in app preferences encrypted with Android Keystore AES-GCM. The README, Gradle files, and `local.properties` should never contain OpenAI or ElevenLabs keys. Use `Clear` in the phone app to remove a saved key. Provider dashboards remain the source of truth for usage, quotas, billing, and key rotation.
 
 ---
 
