@@ -1,11 +1,13 @@
 package com.rokid.relay.phone
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
@@ -53,19 +55,45 @@ class RelayService : Service() {
 
     private fun startForegroundCompat() {
         val notification = buildNotification()
+        val requestMicrophone = shouldRequestMicrophoneForeground()
         runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val microphoneType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && requestMicrophone) {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                } else {
+                    0
+                }
                 startForeground(
                     NOTIFICATION_ID,
                     notification,
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or microphoneType,
                 )
+                microphoneForegroundActive = microphoneType != 0
             } else {
                 startForeground(NOTIFICATION_ID, notification)
+                microphoneForegroundActive = requestMicrophone
             }
         }.onFailure {
+            microphoneForegroundActive = false
             Log.w(TAG, "foreground start failed: ${it.message}")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && requestMicrophone) {
+                runCatching {
+                    startForeground(
+                        NOTIFICATION_ID,
+                        buildNotification(),
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
+                    )
+                }.onFailure { fallbackError ->
+                    Log.w(TAG, "connected foreground fallback failed: ${fallbackError.message}")
+                }
+            }
         }
+    }
+
+    private fun shouldRequestMicrophoneForeground(): Boolean {
+        val selected = SpeechToTextSettingsStore(this).selectedEngine()
+        return selected.requiresMicrophonePermission &&
+            checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
     }
 
     private fun buildNotification(): Notification {
@@ -104,10 +132,17 @@ class RelayService : Service() {
         @Volatile var running: Boolean = false
             private set
 
+        @Volatile var microphoneForegroundActive: Boolean = false
+            private set
+
         @Volatile private var instance: RelayService? = null
 
         private const val TAG = "RelayService"
         private const val CHANNEL_ID = "rokid_relay"
         private const val NOTIFICATION_ID = 7201
+
+        fun refreshForeground() {
+            instance?.startForegroundCompat()
+        }
     }
 }

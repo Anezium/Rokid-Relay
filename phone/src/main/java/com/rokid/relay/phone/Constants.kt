@@ -23,8 +23,11 @@ object Constants {
 
     const val PREFS = "rokid_relay"
     const val PREF_AUTH_TOKEN = "auth_token"
+    const val PREF_STT_ENGINE = "stt_engine"
     const val PREF_STT_OPENAI_KEY = "stt_openai_key"
     const val PREF_STT_OPENAI_LABEL = "stt_openai_label"
+    const val PREF_STT_ELEVENLABS_KEY = "stt_elevenlabs_key"
+    const val PREF_STT_ELEVENLABS_LABEL = "stt_elevenlabs_label"
 
     const val TEST_NOTIFICATION_ID = 7202
     const val TEST_NOTIFICATION_CHANNEL = "rokid_relay_test"

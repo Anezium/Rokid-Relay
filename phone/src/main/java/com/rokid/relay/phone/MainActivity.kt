@@ -20,18 +20,24 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Spinner
 import android.widget.TextView
 
 class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
+    private val sttEngines = SpeechToTextEngine.values().toList()
     private lateinit var statusList: LinearLayout
     private lateinit var activityText: TextView
     private lateinit var sttSummary: TextView
+    private lateinit var engineSpinner: Spinner
     private lateinit var openAiKeyInput: EditText
+    private lateinit var elevenLabsKeyInput: EditText
 
     private val pollStatus = object : Runnable {
         override fun run() {
@@ -56,6 +62,13 @@ class MainActivity : Activity() {
     override fun onPause() {
         handler.removeCallbacks(pollStatus)
         super.onPause()
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        RelayStarter.startIfReady(this, "permissions")
+        RelayService.refreshForeground()
+        renderStatus()
     }
 
     @Deprecated("Hi Rokid still returns authorization through onActivityResult")
@@ -125,17 +138,10 @@ class MainActivity : Activity() {
         })
 
         root.addView(section("Controls") {
-            addView(buttonRow(
-                actionButton("Start relay", ButtonTone.Primary) {
-                    val started = RelayStarter.startIfReady(this@MainActivity, "manual")
-                    renderStatus()
-                    if (!started) toastLine("Authorize Hi Rokid before starting relay")
-                },
-                actionButton("Stop relay", ButtonTone.Danger) {
-                    RelayStarter.stop(this@MainActivity)
-                    renderStatus()
-                },
-            ))
+            addView(actionButton("Stop relay", ButtonTone.Danger) {
+                RelayStarter.stop(this@MainActivity)
+                renderStatus()
+            })
             addView(actionButton("Authorize Hi Rokid", ButtonTone.Secondary) {
                 if (!CxrLAuth.isGlobalHiRokidInstalled(this@MainActivity)) {
                     toastLine("Hi Rokid Global is not visible to Rokid Relay")
@@ -168,7 +174,7 @@ class MainActivity : Activity() {
 
         root.addView(section("Speech to text") {
             addView(TextView(this@MainActivity).apply {
-                text = "OpenAI API key"
+                text = "Engine"
                 textSize = 13f
                 typeface = Typeface.DEFAULT_BOLD
                 includeFontPadding = false
@@ -181,6 +187,40 @@ class MainActivity : Activity() {
                 setPadding(0, dp(6), 0, dp(8))
             }
             addView(sttSummary, matchWrap())
+            engineSpinner = Spinner(this@MainActivity).apply {
+                adapter = ArrayAdapter(
+                    this@MainActivity,
+                    android.R.layout.simple_spinner_item,
+                    sttEngines.map { it.displayName },
+                ).also {
+                    it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+                }
+                background = inputBackground()
+                minimumHeight = dp(48)
+                onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                    override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                        val engine = sttEngines.getOrNull(position) ?: return
+                        val store = SpeechToTextSettingsStore(this@MainActivity)
+                        if (store.selectedEngine() == engine) return
+                        store.saveSelectedEngine(engine)
+                        if (engine.requiresMicrophonePermission) requestMicrophonePermissionIfNeeded()
+                        RelayStarter.startIfReady(this@MainActivity, "stt_engine")
+                        renderStatus()
+                    }
+
+                    override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+                }
+            }
+            addView(engineSpinner, matchWrap(top = 2))
+
+            addView(TextView(this@MainActivity).apply {
+                text = "OpenAI API key"
+                textSize = 13f
+                typeface = Typeface.DEFAULT_BOLD
+                includeFontPadding = false
+                setTextColor(COLOR_TEXT)
+                setPadding(0, dp(14), 0, 0)
+            }, matchWrap())
             openAiKeyInput = EditText(this@MainActivity).apply {
                 hint = "sk-..."
                 textSize = 15f
@@ -197,9 +237,12 @@ class MainActivity : Activity() {
             }
             addView(openAiKeyInput, matchWrap(top = 2))
             addView(buttonRow(
-                actionButton("Save key", ButtonTone.Primary) {
+                actionButton("Save OpenAI", ButtonTone.Primary) {
                     val notice = runCatching {
-                        SttCredentialStore(this@MainActivity).saveOpenAiApiKey(openAiKeyInput.text.toString())
+                        SttCredentialStore(this@MainActivity).saveApiKey(
+                            SpeechToTextCredentialKind.OPENAI,
+                            openAiKeyInput.text.toString(),
+                        )
                     }.fold(
                         onSuccess = {
                             openAiKeyInput.text.clear()
@@ -212,13 +255,69 @@ class MainActivity : Activity() {
                     renderStatus()
                     toastLine(notice)
                 },
-                actionButton("Clear key", ButtonTone.Secondary) {
-                    SttCredentialStore(this@MainActivity).clearOpenAiApiKey()
+                actionButton("Clear OpenAI", ButtonTone.Secondary) {
+                    SttCredentialStore(this@MainActivity).clearApiKey(SpeechToTextCredentialKind.OPENAI)
                     openAiKeyInput.text.clear()
                     renderStatus()
                     toastLine("OpenAI STT key cleared")
                 },
             ))
+
+            addView(TextView(this@MainActivity).apply {
+                text = "ElevenLabs API key"
+                textSize = 13f
+                typeface = Typeface.DEFAULT_BOLD
+                includeFontPadding = false
+                setTextColor(COLOR_TEXT)
+                setPadding(0, dp(14), 0, 0)
+            }, matchWrap())
+            elevenLabsKeyInput = EditText(this@MainActivity).apply {
+                hint = "xi-..."
+                textSize = 15f
+                setSingleLine(true)
+                includeFontPadding = false
+                setTextColor(COLOR_TEXT)
+                setHintTextColor(COLOR_MUTED)
+                typeface = Typeface.MONOSPACE
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                setSelectAllOnFocus(true)
+                setPadding(dp(12), 0, dp(12), 0)
+                minHeight = dp(48)
+                background = inputBackground()
+            }
+            addView(elevenLabsKeyInput, matchWrap(top = 2))
+            addView(buttonRow(
+                actionButton("Save ElevenLabs", ButtonTone.Primary) {
+                    val notice = runCatching {
+                        SttCredentialStore(this@MainActivity).saveApiKey(
+                            SpeechToTextCredentialKind.ELEVENLABS,
+                            elevenLabsKeyInput.text.toString(),
+                        )
+                    }.fold(
+                        onSuccess = {
+                            elevenLabsKeyInput.text.clear()
+                            "ElevenLabs STT key saved"
+                        },
+                        onFailure = {
+                            "Failed to save STT key: ${it.message}"
+                        },
+                    )
+                    renderStatus()
+                    toastLine(notice)
+                },
+                actionButton("Clear ElevenLabs", ButtonTone.Secondary) {
+                    SttCredentialStore(this@MainActivity).clearApiKey(SpeechToTextCredentialKind.ELEVENLABS)
+                    elevenLabsKeyInput.text.clear()
+                    renderStatus()
+                    toastLine("ElevenLabs STT key cleared")
+                },
+            ))
+
+            addView(actionButton("Grant microphone permission", ButtonTone.Secondary) {
+                requestMicrophonePermissionIfNeeded()
+                RelayStarter.startIfReady(this@MainActivity, "microphone_permission")
+                renderStatus()
+            })
         })
 
         return ScrollView(this).apply {
@@ -280,16 +379,41 @@ class MainActivity : Activity() {
         val hiRokid = CxrLAuth.isGlobalHiRokidInstalled(this)
         val notifications = notificationAccessEnabled()
         val authSaved = !savedToken().isNullOrBlank()
+        val sttSettings = SpeechToTextSettingsStore(this)
+        val selectedEngine = sttSettings.selectedEngine()
         val stt = SttCredentialStore(this)
-        val sttLabel = stt.openAiAccountLabel()
+        val openAiLabel = stt.accountLabel(SpeechToTextCredentialKind.OPENAI)
+        val elevenLabsLabel = stt.accountLabel(SpeechToTextCredentialKind.ELEVENLABS)
+        val sttReady = sttReady(selectedEngine, stt)
+        val micPermissionGranted = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+
+        if (::engineSpinner.isInitialized) {
+            val index = sttEngines.indexOf(selectedEngine).coerceAtLeast(0)
+            if (engineSpinner.selectedItemPosition != index) {
+                engineSpinner.setSelection(index, false)
+            }
+        }
 
         if (::sttSummary.isInitialized) {
-            sttSummary.text = if (sttLabel.isNullOrBlank()) {
-                "No key saved. Voice replies need STT."
-            } else {
-                "Stored securely as $sttLabel"
+            sttSummary.text = buildString {
+                append(selectedEngine.displayName)
+                append(" selected. ")
+                append(
+                    when {
+                        selectedEngine.requiresMicrophonePermission && !micPermissionGranted ->
+                            "Microphone permission is needed for Android CXR."
+                        selectedEngine.credentialKind == SpeechToTextCredentialKind.OPENAI && openAiLabel.isNullOrBlank() ->
+                            "OpenAI key missing."
+                        selectedEngine.credentialKind == SpeechToTextCredentialKind.ELEVENLABS && elevenLabsLabel.isNullOrBlank() ->
+                            "ElevenLabs key missing."
+                        selectedEngine.requiresMicrophonePermission ->
+                            "Uses glasses PCM through Android SpeechRecognizer."
+                        else ->
+                            "Uses buffered glasses PCM, no phone-mic fallback."
+                    },
+                )
             }
-            sttSummary.setTextColor(if (sttLabel.isNullOrBlank()) COLOR_MUTED else COLOR_PHOSPHOR_DARK)
+            sttSummary.setTextColor(if (sttReady) COLOR_PHOSPHOR_DARK else COLOR_MUTED)
         }
 
         if (::statusList.isInitialized) {
@@ -298,7 +422,9 @@ class MainActivity : Activity() {
                     StatusLine("Hi Rokid", if (hiRokid) "Installed" else "Not ready", if (hiRokid) StatusTone.Ready else StatusTone.Waiting),
                     StatusLine("Authorization", if (authSaved) "Saved" else "Missing", if (authSaved) StatusTone.Ready else StatusTone.Waiting),
                     StatusLine("Notifications", if (notifications) "Enabled" else "Disabled", if (notifications) StatusTone.Ready else StatusTone.Waiting),
-                    StatusLine("Speech to text", if (sttLabel.isNullOrBlank()) "Missing key" else "Ready", if (sttLabel.isNullOrBlank()) StatusTone.Waiting else StatusTone.Ready),
+                    StatusLine("STT engine", selectedEngine.shortLabel, StatusTone.Neutral),
+                    StatusLine("Speech to text", if (sttReady) "Ready" else sttMissingReason(selectedEngine, stt), if (sttReady) StatusTone.Ready else StatusTone.Waiting),
+                    StatusLine("Mic foreground", if (RelayService.microphoneForegroundActive) "Active" else "Off", if (RelayService.microphoneForegroundActive) StatusTone.Ready else StatusTone.Neutral),
                     StatusLine("Relay service", if (RelayService.running) "Running" else "Stopped", if (RelayService.running) StatusTone.Ready else StatusTone.Neutral),
                     StatusLine("CXR-L", if (snap.cxrConnected) "Connected" else "Disconnected", if (snap.cxrConnected) StatusTone.Ready else StatusTone.Waiting),
                     StatusLine("Glasses BT", if (snap.glassConnected) "Connected" else "Waiting", if (snap.glassConnected) StatusTone.Ready else StatusTone.Waiting),
@@ -311,6 +437,9 @@ class MainActivity : Activity() {
             activityText.setTextColor(COLOR_TEXT)
             activityText.text = buildString {
                 appendLine("Event: ${snap.lastStatus}")
+                appendLine("Voice: ${snap.voiceRoute} / ${snap.sttEngine}")
+                appendLine("CXR audio: ${displayBytes(snap.cxrAudioBytes)} avg=${snap.vadAverageAbs} peak=${snap.vadPeakAbs} speech=${snap.vadSpeechDetected}")
+                if (snap.lastVoiceError.isNotBlank()) appendLine("Voice error: ${snap.lastVoiceError}")
                 appendLine("Sent: ${displayMessage(snap.lastOutgoingReply)}")
                 append("Received: ${displayMessage(snap.lastDeliveredReply)}")
             }
@@ -438,6 +567,9 @@ class MainActivity : Activity() {
 
     private fun requestRuntimePermissions() {
         val wanted = mutableListOf<String>()
+        if (SpeechToTextSettingsStore(this).selectedEngine().requiresMicrophonePermission) {
+            wanted += Manifest.permission.RECORD_AUDIO
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             wanted += Manifest.permission.BLUETOOTH_CONNECT
             wanted += Manifest.permission.BLUETOOTH_SCAN
@@ -448,6 +580,30 @@ class MainActivity : Activity() {
         val missing = wanted.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
         if (missing.isNotEmpty()) requestPermissions(missing.toTypedArray(), 42)
     }
+
+    private fun requestMicrophonePermissionIfNeeded() {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 43)
+        }
+    }
+
+    private fun sttReady(engine: SpeechToTextEngine, store: SttCredentialStore): Boolean =
+        when {
+            engine.requiresMicrophonePermission ->
+                checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+            engine.requiresCredential -> store.hasCredential(engine)
+            else -> true
+        }
+
+    private fun sttMissingReason(engine: SpeechToTextEngine, store: SttCredentialStore): String =
+        when {
+            engine.requiresMicrophonePermission &&
+                checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED ->
+                "Mic permission"
+            engine.requiresCredential && !store.hasCredential(engine) ->
+                "${engine.provider.displayName} key"
+            else -> "Not ready"
+        }
 
     private fun notificationAccessEnabled(): Boolean {
         val enabled = Settings.Secure.getString(
@@ -474,6 +630,13 @@ class MainActivity : Activity() {
         if (oneLine.isBlank()) return "-"
         return if (oneLine.length <= 160) oneLine else oneLine.take(157) + "..."
     }
+
+    private fun displayBytes(value: Long): String =
+        when {
+            value >= 1_000_000L -> "${value / 1_000_000L} MB"
+            value >= 1_000L -> "${value / 1_000L} KB"
+            else -> "$value B"
+        }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 

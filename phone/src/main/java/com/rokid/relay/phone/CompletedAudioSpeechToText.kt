@@ -27,16 +27,32 @@ interface CompletedAudioSpeechToTextEngine {
     fun cancel()
 }
 
-class OpenAiCompletedAudioSpeechToTextEngine(
+class ApiCompletedAudioSpeechToTextEngine(
     private val credentialStore: SttCredentialStore,
+    private val engine: SpeechToTextEngine,
 ) : CompletedAudioSpeechToTextEngine {
     @Volatile private var activeConnection: HttpURLConnection? = null
 
     override fun transcribe(input: CompletedAudioSpeechToTextInput): String {
         require(input.pcm16Mono.size >= MIN_AUDIO_BYTES) { "Not enough audio captured" }
-        val apiKey = credentialStore.openAiApiKey()?.trim().orEmpty()
-        require(apiKey.isNotBlank()) { "OpenAI STT key missing" }
+        require(engine.usesCompletedAudio) { "${engine.displayName} is not a completed-audio STT engine" }
+        val model = engine.completedAudioModelId ?: error("${engine.displayName} has no model id")
         val wav = Pcm16Wav.encode(input.pcm16Mono, input.sampleRate)
+        return when (engine.provider) {
+            SpeechToTextProvider.OPENAI -> transcribeOpenAi(model, wav)
+            SpeechToTextProvider.ELEVENLABS -> transcribeElevenLabs(model, wav)
+            SpeechToTextProvider.ANDROID -> error("${engine.displayName} is not an API STT engine")
+        }
+    }
+
+    override fun cancel() {
+        activeConnection?.disconnect()
+        activeConnection = null
+    }
+
+    private fun transcribeOpenAi(model: String, wav: ByteArray): String {
+        val apiKey = credentialStore.apiKey(SpeechToTextCredentialKind.OPENAI)?.trim().orEmpty()
+        require(apiKey.isNotBlank()) { "OpenAI STT key missing" }
         val connection = (URL(OPENAI_TRANSCRIPTIONS_URL).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = CONNECT_TIMEOUT_MS
@@ -47,8 +63,8 @@ class OpenAiCompletedAudioSpeechToTextEngine(
         }
         activeConnection = connection
         return try {
-            connection.useMultipart { boundary ->
-                writeField(boundary, "model", OPENAI_TRANSCRIPTION_MODEL)
+            connection.useMultipart("OpenAI STT") { boundary ->
+                writeField(boundary, "model", model)
                 writeField(boundary, "response_format", "json")
                 writeField(
                     boundary,
@@ -68,9 +84,32 @@ class OpenAiCompletedAudioSpeechToTextEngine(
         }
     }
 
-    override fun cancel() {
-        activeConnection?.disconnect()
-        activeConnection = null
+    private fun transcribeElevenLabs(model: String, wav: ByteArray): String {
+        val apiKey = credentialStore.apiKey(SpeechToTextCredentialKind.ELEVENLABS)?.trim().orEmpty()
+        require(apiKey.isNotBlank()) { "ElevenLabs STT key missing" }
+        val connection = (URL(ELEVENLABS_SPEECH_TO_TEXT_URL).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = CONNECT_TIMEOUT_MS
+            readTimeout = READ_TIMEOUT_MS
+            doOutput = true
+            setRequestProperty("xi-api-key", apiKey)
+            setRequestProperty("Accept", "application/json")
+        }
+        activeConnection = connection
+        return try {
+            connection.useMultipart("ElevenLabs STT") { boundary ->
+                writeField(boundary, "model_id", model)
+                writeFile(
+                    boundary = boundary,
+                    name = "file",
+                    filename = "rokid-relay-reply.wav",
+                    contentType = "audio/wav",
+                    bytes = wav,
+                )
+            }.extractTranscript()
+        } finally {
+            activeConnection = null
+        }
     }
 
     private fun String.extractTranscript(): String {
@@ -86,7 +125,7 @@ class OpenAiCompletedAudioSpeechToTextEngine(
         }
     }
 
-    private fun HttpURLConnection.useMultipart(write: MultipartWriter.(String) -> Unit): String {
+    private fun HttpURLConnection.useMultipart(label: String, write: MultipartWriter.(String) -> Unit): String {
         val boundary = "----RokidRelay${UUID.randomUUID().toString().replace("-", "")}"
         setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
         try {
@@ -99,7 +138,7 @@ class OpenAiCompletedAudioSpeechToTextEngine(
                     .use { it.readText() }
             }.getOrDefault("")
             if (status !in 200..299) {
-                error("OpenAI STT failed ($status): ${body.take(420).ifBlank { "no error body" }}")
+                error("$label failed ($status): ${body.take(420).ifBlank { "no error body" }}")
             }
             return body
         } finally {
@@ -143,7 +182,7 @@ class OpenAiCompletedAudioSpeechToTextEngine(
 
     private companion object {
         const val OPENAI_TRANSCRIPTIONS_URL = "https://api.openai.com/v1/audio/transcriptions"
-        const val OPENAI_TRANSCRIPTION_MODEL = "gpt-4o-transcribe"
+        const val ELEVENLABS_SPEECH_TO_TEXT_URL = "https://api.elevenlabs.io/v1/speech-to-text"
         const val CONNECT_TIMEOUT_MS = 20_000
         const val READ_TIMEOUT_MS = 120_000
         const val MIN_AUDIO_BYTES = 3_200
@@ -155,8 +194,11 @@ class SttCredentialStore(context: Context) {
 
     fun hasOpenAiApiKey(): Boolean = !openAiApiKey().isNullOrBlank()
 
-    fun openAiApiKey(): String? {
-        val raw = prefs.getString(Constants.PREF_STT_OPENAI_KEY, null) ?: return null
+    fun hasCredential(engine: SpeechToTextEngine): Boolean =
+        !apiKey(engine.credentialKind).isNullOrBlank()
+
+    fun apiKey(kind: SpeechToTextCredentialKind): String? {
+        val raw = prefs.getString(kind.keyPreferenceName() ?: return null, null) ?: return null
         return runCatching {
             SttKeystoreAesGcm.decrypt(JSONObject(raw))
                 .optString("apiKey")
@@ -164,27 +206,57 @@ class SttCredentialStore(context: Context) {
         }.getOrNull()
     }
 
+    fun openAiApiKey(): String? = apiKey(SpeechToTextCredentialKind.OPENAI)
+
     fun openAiAccountLabel(): String? =
-        prefs.getString(Constants.PREF_STT_OPENAI_LABEL, null)
+        accountLabel(SpeechToTextCredentialKind.OPENAI)
             ?: openAiApiKey()?.redactedSttKey()
 
-    fun saveOpenAiApiKey(apiKey: String) {
+    fun accountLabel(kind: SpeechToTextCredentialKind): String? {
+        val labelName = kind.labelPreferenceName() ?: return null
+        return prefs.getString(labelName, null)
+            ?: apiKey(kind)?.redactedSttKey()
+    }
+
+    fun saveApiKey(kind: SpeechToTextCredentialKind, apiKey: String) {
+        val keyName = kind.keyPreferenceName() ?: error("No API key is required for this STT engine")
+        val labelName = kind.labelPreferenceName() ?: error("No API key is required for this STT engine")
         val cleanKey = apiKey.trim()
         require(cleanKey.isNotBlank()) { "API key is required" }
         val encrypted = SttKeystoreAesGcm.encrypt(JSONObject().put("apiKey", cleanKey))
         prefs.edit()
-            .putString(Constants.PREF_STT_OPENAI_KEY, encrypted.toString())
-            .putString(Constants.PREF_STT_OPENAI_LABEL, cleanKey.redactedSttKey())
+            .putString(keyName, encrypted.toString())
+            .putString(labelName, cleanKey.redactedSttKey())
             .apply()
     }
 
-    fun clearOpenAiApiKey() {
+    fun saveOpenAiApiKey(apiKey: String) = saveApiKey(SpeechToTextCredentialKind.OPENAI, apiKey)
+
+    fun clearApiKey(kind: SpeechToTextCredentialKind) {
+        val keyName = kind.keyPreferenceName() ?: return
+        val labelName = kind.labelPreferenceName() ?: return
         prefs.edit()
-            .remove(Constants.PREF_STT_OPENAI_KEY)
-            .remove(Constants.PREF_STT_OPENAI_LABEL)
+            .remove(keyName)
+            .remove(labelName)
             .apply()
     }
+
+    fun clearOpenAiApiKey() = clearApiKey(SpeechToTextCredentialKind.OPENAI)
 }
+
+private fun SpeechToTextCredentialKind.keyPreferenceName(): String? =
+    when (this) {
+        SpeechToTextCredentialKind.NONE -> null
+        SpeechToTextCredentialKind.OPENAI -> Constants.PREF_STT_OPENAI_KEY
+        SpeechToTextCredentialKind.ELEVENLABS -> Constants.PREF_STT_ELEVENLABS_KEY
+    }
+
+private fun SpeechToTextCredentialKind.labelPreferenceName(): String? =
+    when (this) {
+        SpeechToTextCredentialKind.NONE -> null
+        SpeechToTextCredentialKind.OPENAI -> Constants.PREF_STT_OPENAI_LABEL
+        SpeechToTextCredentialKind.ELEVENLABS -> Constants.PREF_STT_ELEVENLABS_LABEL
+    }
 
 private object Pcm16Wav {
     fun encode(pcm16Mono: ByteArray, sampleRate: Int): ByteArray {

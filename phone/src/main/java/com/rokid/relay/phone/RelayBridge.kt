@@ -20,6 +20,13 @@ object RelayBridge {
         val lastStatus: String,
         val lastOutgoingReply: String,
         val lastDeliveredReply: String,
+        val sttEngine: String,
+        val voiceRoute: String,
+        val cxrAudioBytes: Long,
+        val vadAverageAbs: Int,
+        val vadPeakAbs: Int,
+        val vadSpeechDetected: Boolean,
+        val lastVoiceError: String,
     )
 
     private const val TAG = "RokidRelayBridge"
@@ -31,6 +38,13 @@ object RelayBridge {
     @Volatile private var lastStatus = "idle"
     @Volatile private var lastOutgoingReply = ""
     @Volatile private var lastDeliveredReply = ""
+    @Volatile private var sttEngine = "not selected"
+    @Volatile private var voiceRoute = "idle"
+    @Volatile private var cxrAudioBytes = 0L
+    @Volatile private var vadAverageAbs = 0
+    @Volatile private var vadPeakAbs = 0
+    @Volatile private var vadSpeechDetected = false
+    @Volatile private var lastVoiceError = ""
     @Volatile private var bootstrapStarted = false
 
     private var appContext: Context? = null
@@ -68,6 +82,33 @@ object RelayBridge {
         lastStatus = if (text.isBlank()) "test reply received empty" else "test reply received"
     }
 
+    fun recordVoiceStart(engine: SpeechToTextEngine, route: String) {
+        sttEngine = engine.shortLabel
+        voiceRoute = route
+        cxrAudioBytes = 0L
+        vadAverageAbs = 0
+        vadPeakAbs = 0
+        vadSpeechDetected = false
+        lastVoiceError = ""
+        lastStatus = "voice listening"
+    }
+
+    fun recordVoiceAudio(snapshot: VoiceActivitySnapshot) {
+        cxrAudioBytes = snapshot.totalBytes
+        vadAverageAbs = snapshot.averageAbs
+        vadPeakAbs = snapshot.peakAbs
+        vadSpeechDetected = snapshot.speechDetected
+    }
+
+    fun recordVoiceError(message: String) {
+        lastVoiceError = message
+        lastStatus = "voice error"
+    }
+
+    fun recordVoiceIdle(status: String = "idle") {
+        voiceRoute = status
+    }
+
     fun snapshot(): Snapshot = Snapshot(
         cxrConnected = cxrConnected,
         glassConnected = glassConnected,
@@ -75,6 +116,13 @@ object RelayBridge {
         lastStatus = lastStatus,
         lastOutgoingReply = lastOutgoingReply,
         lastDeliveredReply = lastDeliveredReply,
+        sttEngine = sttEngine,
+        voiceRoute = voiceRoute,
+        cxrAudioBytes = cxrAudioBytes,
+        vadAverageAbs = vadAverageAbs,
+        vadPeakAbs = vadPeakAbs,
+        vadSpeechDetected = vadSpeechDetected,
+        lastVoiceError = lastVoiceError,
     )
 
     fun sendNotification(reply: ReplyRepository.PendingReply) {

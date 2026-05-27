@@ -22,6 +22,7 @@ object VoiceController {
     private var voiceActive = false
     private var activeCapture: CxrBufferedAudioCapture? = null
     private var activeEngine: CompletedAudioSpeechToTextEngine? = null
+    private var activeRecognizer: AndroidCxrSpeechRecognizer? = null
     private var lastStartAtMs = 0L
 
     fun start(context: Context, link: CXRLink, notificationId: String) {
@@ -30,8 +31,11 @@ object VoiceController {
                 RelayBridge.sendReplyResult(notificationId, false, "No active notification")
                 return@post
             }
-            if (!SttCredentialStore(context.applicationContext).hasOpenAiApiKey()) {
-                RelayBridge.sendReplyResult(notificationId, false, "OpenAI STT key missing")
+            val appContext = context.applicationContext
+            val selectedEngine = SpeechToTextSettingsStore(appContext).selectedEngine()
+            val credentials = SttCredentialStore(appContext)
+            if (selectedEngine.requiresCredential && !credentials.hasCredential(selectedEngine)) {
+                RelayBridge.sendReplyResult(notificationId, false, "${selectedEngine.provider.displayName} STT key missing")
                 return@post
             }
 
@@ -47,14 +51,27 @@ object VoiceController {
                 return@post
             }
             lastStartAtMs = now
-            appContext = context.applicationContext
+            this.appContext = appContext
             activeLink = link
             activeNotificationId = notificationId
             voiceActive = true
 
             val routedToGlasses = runCatching { link.setCommunicationDevice() }.getOrDefault(false)
-            Log.i(TAG, "Starting voice capture routedToGlasses=$routedToGlasses")
+            Log.i(TAG, "Starting voice capture engine=${selectedEngine.id} routedToGlasses=$routedToGlasses")
             RelayBridge.sendVoiceState("listening")
+            RelayBridge.recordVoiceStart(
+                selectedEngine,
+                if (selectedEngine == SpeechToTextEngine.ANDROID_CXR) {
+                    "Android SpeechRecognizer / CXR pipe"
+                } else {
+                    "CXR buffer / ${selectedEngine.shortLabel}"
+                },
+            )
+
+            if (selectedEngine == SpeechToTextEngine.ANDROID_CXR) {
+                startAndroidCxrRecognizer(appContext, link, notificationId)
+                return@post
+            }
 
             val capture = CxrBufferedAudioCapture(link)
             activeCapture = capture
@@ -65,8 +82,11 @@ object VoiceController {
                 onCaptureFinished = { audio ->
                     if (voiceActive && activeCapture === capture) {
                         RelayBridge.sendVoiceState("processing")
-                        transcribeCapturedAudio(context.applicationContext, audio)
+                        transcribeCapturedAudio(appContext, selectedEngine, audio)
                     }
+                },
+                onAudioLevel = { snapshot ->
+                    if (voiceActive && activeCapture === capture) RelayBridge.recordVoiceAudio(snapshot)
                 },
                 onError = { message ->
                     if (voiceActive && activeCapture === capture) failVoiceRecognition(message)
@@ -78,6 +98,51 @@ object VoiceController {
                 return@post
             }
         }
+    }
+
+    private fun startAndroidCxrRecognizer(context: Context, link: CXRLink, notificationId: String) {
+        var recognizerRef: AndroidCxrSpeechRecognizer? = null
+        val recognizer = AndroidCxrSpeechRecognizer(
+            context = context,
+            link = link,
+            languageTag = Locale.getDefault().toLanguageTag(),
+            listener = object : AndroidCxrSpeechRecognizer.Listener {
+                override fun onListening() {
+                    if (voiceActive && activeRecognizer === recognizerRef && activeNotificationId == notificationId) {
+                        RelayBridge.sendVoiceState("listening")
+                    }
+                }
+
+                override fun onRecognizing(partial: String) {
+                    if (voiceActive && activeRecognizer === recognizerRef && activeNotificationId == notificationId) {
+                        RelayBridge.sendVoiceState("recognizing", partial)
+                    }
+                }
+
+                override fun onAudioLevel(snapshot: VoiceActivitySnapshot) {
+                    if (voiceActive && activeRecognizer === recognizerRef && activeNotificationId == notificationId) {
+                        RelayBridge.recordVoiceAudio(snapshot)
+                    }
+                }
+
+                override fun onComplete(transcript: String, reason: String) {
+                    if (voiceActive && activeRecognizer === recognizerRef && activeNotificationId == notificationId) {
+                        RelayBridge.sendVoiceState("processing")
+                        completeVoiceRecognition(transcript, reason)
+                    }
+                }
+
+                override fun onError(message: String) {
+                    if (voiceActive && activeRecognizer === recognizerRef && activeNotificationId == notificationId) {
+                        failVoiceRecognition(message)
+                    }
+                }
+            },
+        )
+        recognizerRef = recognizer
+        activeRecognizer = recognizer
+        val started = recognizer.start()
+        if (!started && activeRecognizer === recognizer) activeRecognizer = null
     }
 
     fun cancel() {
@@ -105,13 +170,13 @@ object VoiceController {
         RelayBridge.sendInbox()
     }
 
-    private fun transcribeCapturedAudio(context: Context, audio: CxrCapturedAudio) {
-        val engine = OpenAiCompletedAudioSpeechToTextEngine(SttCredentialStore(context))
-        activeEngine = engine
+    private fun transcribeCapturedAudio(context: Context, selectedEngine: SpeechToTextEngine, audio: CxrCapturedAudio) {
+        val speechEngine = ApiCompletedAudioSpeechToTextEngine(SttCredentialStore(context), selectedEngine)
+        activeEngine = speechEngine
         val notificationId = activeNotificationId
         transcriptionExecutor.execute {
             val result = runCatching {
-                engine.transcribe(
+                speechEngine.transcribe(
                     CompletedAudioSpeechToTextInput(
                         pcm16Mono = audio.pcm16Mono,
                         sampleRate = audio.sampleRate,
@@ -120,10 +185,10 @@ object VoiceController {
                 )
             }
             main.post {
-                if (voiceActive && activeEngine === engine && activeNotificationId == notificationId) {
+                if (voiceActive && activeEngine === speechEngine && activeNotificationId == notificationId) {
                     result
                         .onSuccess { transcript ->
-                            completeVoiceRecognition(transcript, "openai ${audio.closeReason}")
+                            completeVoiceRecognition(transcript, "${selectedEngine.id} ${audio.closeReason}")
                         }
                         .onFailure { error ->
                             val message = error.voiceMessage()
@@ -137,6 +202,7 @@ object VoiceController {
 
     private fun failVoiceRecognition(message: String) {
         val id = activeNotificationId
+        RelayBridge.recordVoiceError(message)
         finishVoiceCapture(sendIdle = false, cancelListening = true)
         RelayBridge.sendReplyResult(id, false, message)
     }
@@ -153,13 +219,16 @@ object VoiceController {
         voiceActive = false
         if (cancelListening) {
             activeEngine?.cancel()
+            activeRecognizer?.cancel()
         }
         activeEngine = null
+        activeRecognizer = null
         activeCapture?.stop()
         activeCapture = null
         runCatching { activeLink?.clearCommunicationDevice() }
         activeLink = null
         activeNotificationId = ""
+        RelayBridge.recordVoiceIdle(if (sendIdle) "idle" else "done")
         if (sendIdle) RelayBridge.sendVoiceState("idle")
     }
 
