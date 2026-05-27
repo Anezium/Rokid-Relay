@@ -175,8 +175,6 @@ To add or change keys:
 7. Paste the key into the provider field.
 8. Tap `Save`.
 
-OpenAI keys normally start with `sk-...`. ElevenLabs keys normally start with `xi-...`.
-
 Keys are stored on the phone in app preferences encrypted with Android Keystore AES-GCM. The README, Gradle files, and `local.properties` should never contain OpenAI or ElevenLabs keys. Use `Clear` in the phone app to remove a saved key. Provider dashboards remain the source of truth for usage, quotas, billing, and key rotation.
 
 ---
