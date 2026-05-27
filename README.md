@@ -118,6 +118,18 @@ After the phone has a saved Hi Rokid token, notification access, and a ready STT
 
 The phone keeps a foreground `Rokid Relay running` notification while relay mode is active. Use the phone app `Stop` button or the foreground notification action to stop it.
 
+### Hi Rokid notification routing
+
+Rokid Relay does not currently suppress or coordinate with Hi Rokid's own notification mirroring. If Hi Rokid is also forwarding the same phone notifications to the glasses, you may see duplicate notification UI: one from Hi Rokid and one from Rokid Relay.
+
+Recommended setup:
+
+1. In Global Hi Rokid, disable phone notification mirroring entirely if you want Rokid Relay to own the notification experience.
+2. Or, disable Hi Rokid notifications only for apps where replies matter, such as messaging apps.
+3. Keep non-replyable apps enabled in Hi Rokid if you still want normal glance-only notifications there.
+
+In practice, the cleanest split is: replyable messaging apps go through Rokid Relay, and everything else can stay on Hi Rokid.
+
 ---
 
 ## Speech setup
@@ -347,6 +359,7 @@ If you change the glasses app, rebuild the phone debug APK too so the bundled `r
 
 - Only notifications with a free-form Android `RemoteInput` reply action can be answered.
 - Normal notifications without direct reply are ignored.
+- Hi Rokid notification mirroring is not automatically disabled, so duplicate overlays are possible unless you disable Hi Rokid notifications globally or for the replyable apps handled by Rokid Relay.
 - Some messaging apps customize or revoke reply actions, so behavior can vary by app and Android version.
 - The inbox is in-memory and limited to recent pending replyable notifications. It is not persistent history.
 - The phone currently sends up to eight pending notifications to the glasses.
