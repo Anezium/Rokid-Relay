@@ -3,11 +3,11 @@ plugins {
 }
 
 android {
-    namespace = "com.rokid.relay.phone"
+    namespace = "com.anezium.rokidrelay.phone"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.rokid.relay.phone"
+        applicationId = "com.anezium.rokidrelay.phone"
         minSdk = 31
         targetSdk = 36
         versionCode = 1
@@ -33,6 +33,7 @@ android {
 dependencies {
     implementation("com.example.cxrglobal:lib:0.1.0-SNAPSHOT")
     implementation("com.rokid.cxr:client-l:1.0.1")
+    implementation("androidx.core:core:1.18.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }
 

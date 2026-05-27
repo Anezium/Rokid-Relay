@@ -3,11 +3,11 @@ plugins {
 }
 
 android {
-    namespace = "com.rokid.relay.glasses"
+    namespace = "com.anezium.rokidrelay.glasses"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.rokid.relay.glasses"
+        applicationId = "com.anezium.rokidrelay.glasses"
         minSdk = 31
         targetSdk = 32
         versionCode = 1

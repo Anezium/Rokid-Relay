@@ -278,7 +278,7 @@ The phone app has a `Diagnostics` panel.
 You can also post the test notification with ADB:
 
 ```powershell
-adb shell am broadcast -n com.rokid.relay.phone/.TestNotificationReceiver -a com.rokid.relay.phone.POST_TEST_NOTIFICATION
+adb shell am broadcast -n com.anezium.rokidrelay.phone/.TestNotificationReceiver -a com.anezium.rokidrelay.phone.POST_TEST_NOTIFICATION
 ```
 
 For the local test notification, `Last sent reply` shows what Relay sent through Android direct reply, and `Last received reply` shows what the test receiver actually received.

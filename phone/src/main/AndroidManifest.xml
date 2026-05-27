@@ -12,6 +12,7 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <queries>
         <package android:name="com.rokid.sprite.global.aiapp" />
@@ -31,6 +32,16 @@
         android:roundIcon="@drawable/relay_icon_bitmap"
         android:supportsRtl="true"
         android:theme="@style/Theme.RokidRelay.Phone">
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/update_file_paths" />
+        </provider>
 
         <activity
             android:name=".MainActivity"
@@ -60,7 +71,7 @@
             android:name=".TestNotificationReceiver"
             android:exported="true">
             <intent-filter>
-                <action android:name="com.rokid.relay.phone.POST_TEST_NOTIFICATION" />
+                <action android:name="com.anezium.rokidrelay.phone.POST_TEST_NOTIFICATION" />
             </intent-filter>
         </receiver>
 
