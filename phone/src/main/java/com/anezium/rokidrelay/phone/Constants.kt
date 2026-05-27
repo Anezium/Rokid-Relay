@@ -36,6 +36,7 @@ object Constants {
     const val PREF_THREAD_MESSAGE_LIMIT = "thread_message_limit"
     const val PREF_INPUT_COMBO = "input_combo"
     const val PREF_SWIPE_MODE = "swipe_mode"
+    const val PREF_CLIENT_APK_FINGERPRINT = "client_apk_fingerprint"
 
     const val TEST_NOTIFICATION_ID = 7202
     const val TEST_NOTIFICATION_SECOND_THREAD_ID = 7203
