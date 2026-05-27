@@ -28,6 +28,8 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.window.OnBackInvokedCallback
+import android.window.OnBackInvokedDispatcher
 
 class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
@@ -74,6 +76,7 @@ class MainActivity : Activity() {
     private var autoReauthAttempted = false
     private var apiKeysVisible = false
     private var selectedTab = AppTab.HOME
+    private var modernBackCallback: OnBackInvokedCallback? = null
 
     private val pollStatus = object : Runnable {
         override fun run() {
@@ -88,6 +91,7 @@ class MainActivity : Activity() {
         val content = buildContent()
         setContentView(content)
         KeyboardFocusScroller.install(this, content)
+        registerModernBackHandler()
     }
 
     override fun onResume() {
@@ -104,11 +108,12 @@ class MainActivity : Activity() {
 
     @Deprecated("Use legacy Activity back handling because this app does not use AndroidX")
     override fun onBackPressed() {
-        if (selectedTab != AppTab.HOME) {
-            selectTab(AppTab.HOME)
-            return
-        }
-        super.onBackPressed()
+        if (!navigateBackWithinApp()) super.onBackPressed()
+    }
+
+    override fun onDestroy() {
+        unregisterModernBackHandler()
+        super.onDestroy()
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -359,6 +364,32 @@ class MainActivity : Activity() {
         }
         if (::speechPage.isInitialized) speechPage.visibility = if (tab == AppTab.SPEECH) View.VISIBLE else View.GONE
         updateTabButtons()
+    }
+
+    private fun navigateBackWithinApp(): Boolean {
+        if (selectedTab == AppTab.HOME) return false
+        selectTab(AppTab.HOME)
+        return true
+    }
+
+    private fun registerModernBackHandler() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || modernBackCallback != null) return
+        val callback = OnBackInvokedCallback {
+            if (!navigateBackWithinApp()) finish()
+        }
+        modernBackCallback = callback
+        onBackInvokedDispatcher.registerOnBackInvokedCallback(
+            OnBackInvokedDispatcher.PRIORITY_DEFAULT,
+            callback,
+        )
+    }
+
+    private fun unregisterModernBackHandler() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        modernBackCallback?.let { callback ->
+            onBackInvokedDispatcher.unregisterOnBackInvokedCallback(callback)
+        }
+        modernBackCallback = null
     }
 
     private fun updateTabButtons() {
