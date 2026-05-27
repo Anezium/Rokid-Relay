@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Parcelable
 import android.service.notification.StatusBarNotification
+import android.util.Log
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
@@ -24,10 +25,16 @@ object ReplyRepository {
         val appLabel: String,
         val title: String,
         val text: String,
+        val revision: String,
         val notificationKey: String,
         val actionIntent: PendingIntent,
         val remoteInputs: Array<RemoteInput>,
         val capturedAtMs: Long,
+    )
+
+    private data class IndexedMessage(
+        val index: Int,
+        val message: Notification.MessagingStyle.Message,
     )
 
     private val pending = ConcurrentHashMap<String, PendingReply>()
@@ -42,7 +49,12 @@ object ReplyRepository {
         val extras = sbn.notification.extras
         val appLabel = appLabel(context, sbn.packageName)
         val title = extras.charSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
-        val text = notificationText(extras)
+        val messageLimit = NotificationSettingsStore(context).threadMessageLimit()
+        val text = notificationText(extras, messageLimit)
+        val revision = notificationRevision(sbn, extras)
+        if (hasRemoteInputHistory(extras) && NotificationSettingsStore(context).clearPhoneNotificationAfterReply()) {
+            NotificationControl.cancelAfterReply(sbn.key)
+        }
         val previous = pending[id]
         val contentChanged = previous == null ||
             !previous.hasSameVisibleContent(
@@ -50,6 +62,7 @@ object ReplyRepository {
                 appLabel = appLabel,
                 title = title,
                 text = text,
+                revision = revision,
             )
         val reply = PendingReply(
             id = id,
@@ -57,6 +70,7 @@ object ReplyRepository {
             appLabel = appLabel,
             title = title,
             text = text,
+            revision = revision,
             notificationKey = sbn.key,
             actionIntent = action.actionIntent,
             remoteInputs = remoteInputs,
@@ -67,9 +81,14 @@ object ReplyRepository {
             },
         )
         pending[id] = reply
+        val mostRecent = isMostRecent(reply.id)
+        Log.i(
+            TAG,
+            "captured pkg=${sbn.packageName} id=${id.take(8)} changed=$contentChanged mostRecent=$mostRecent textLen=${text.length}",
+        )
         return CaptureResult(
             reply = reply,
-            shouldShowNow = contentChanged && isMostRecent(reply.id),
+            shouldShowNow = contentChanged && mostRecent,
         )
     }
 
@@ -109,7 +128,7 @@ object ReplyRepository {
         forget(stableId(sbn.key))
     }
 
-    fun listPending(limit: Int = 8): List<PendingReply> =
+    fun listPending(limit: Int = NotificationSettingsStore.DEFAULT_INBOX_ENTRY_LIMIT): List<PendingReply> =
         pending.values
             .sortedByDescending { it.capturedAtMs }
             .take(limit.coerceAtLeast(1))
@@ -123,8 +142,12 @@ object ReplyRepository {
                 action.actionIntent != null
         }
 
-    private fun notificationText(extras: Bundle): String {
-        val messages = messagingStyleText(extras)
+    private fun notificationText(extras: Bundle, messageLimit: Int): String {
+        val maxMessages = messageLimit.coerceIn(
+            NotificationSettingsStore.MIN_THREAD_MESSAGE_LIMIT,
+            NotificationSettingsStore.MAX_THREAD_MESSAGE_LIMIT,
+        )
+        val messages = messagingStyleText(extras, maxMessages)
         if (messages.isNotBlank()) return messages
 
         val big = extras.charSequence(Notification.EXTRA_BIG_TEXT)
@@ -133,7 +156,7 @@ object ReplyRepository {
         val lines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
         if (!lines.isNullOrEmpty()) {
             return lines
-                .takeLast(MAX_VISIBLE_MESSAGE_COUNT)
+                .takeLast(maxMessages)
                 .joinToString("\n") { it.toString() }
         }
 
@@ -141,10 +164,9 @@ object ReplyRepository {
         return text?.toString().orEmpty()
     }
 
-    private fun messagingStyleText(extras: Bundle): String {
-        val bundles = messageBundles(extras) ?: return ""
-        return Notification.MessagingStyle.Message.getMessagesFromBundleArray(bundles)
-            .takeLast(MAX_VISIBLE_MESSAGE_COUNT)
+    private fun messagingStyleText(extras: Bundle, messageLimit: Int): String {
+        return messagingStyleMessages(extras)
+            .takeLast(messageLimit)
             .mapNotNull { message ->
                 val text = message.text?.toString()?.trim().orEmpty()
                 if (text.isBlank()) {
@@ -155,6 +177,34 @@ object ReplyRepository {
                 }
             }
             .joinToString("\n")
+    }
+
+    private fun notificationRevision(sbn: StatusBarNotification, extras: Bundle): String {
+        val messages = messagingStyleMessages(extras)
+        if (messages.isNotEmpty()) {
+            val first = messages.first()
+            val last = messages.last()
+            return "msg:${messages.size}:${first.timestamp}:${last.timestamp}"
+        }
+        return "plain:${sbn.notification.`when`}"
+    }
+
+    private fun hasRemoteInputHistory(extras: Bundle): Boolean =
+        extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY)
+            ?.any { !it.isNullOrBlank() } == true
+
+    private fun messagingStyleMessages(extras: Bundle): List<Notification.MessagingStyle.Message> {
+        val bundles = messageBundles(extras) ?: return emptyList()
+        val messages = Notification.MessagingStyle.Message.getMessagesFromBundleArray(bundles)
+        if (messages.none { it.timestamp > 0L }) return messages
+        return messages
+            .mapIndexed { index, message -> IndexedMessage(index, message) }
+            .sortedWith(
+                compareBy<IndexedMessage> {
+                    it.message.timestamp.takeIf { timestamp -> timestamp > 0L } ?: Long.MAX_VALUE
+                }.thenBy { it.index },
+            )
+            .map { it.message }
     }
 
     private fun messageBundles(extras: Bundle): Array<Parcelable>? =
@@ -176,11 +226,13 @@ object ReplyRepository {
         appLabel: String,
         title: String,
         text: String,
+        revision: String,
     ): Boolean =
         this.packageName == packageName &&
             this.appLabel == appLabel &&
             this.title == title &&
-            this.text == text
+            this.text == text &&
+            this.revision == revision
 
     private fun nextCaptureAtMs(): Long {
         val now = System.currentTimeMillis()
@@ -195,8 +247,7 @@ object ReplyRepository {
         val digest = MessageDigest.getInstance("SHA-256").digest(key.toByteArray())
         return digest.take(10).joinToString("") { "%02x".format(it) }
     }
-
-    private const val MAX_VISIBLE_MESSAGE_COUNT = 12
+    private const val TAG = "RelayReplyRepo"
 }
 
 private fun Bundle.charSequence(key: String): CharSequence? =

@@ -153,7 +153,7 @@ class RelayAccessibilityService : AccessibilityService() {
         return when (event.keyCode) {
             in CONFIRM_KEYS -> {
                 if (RelayHudController.hasNotification()) {
-                    RelayBridge.dismiss()
+                    RelayBridge.hideNotification()
                     true
                 } else {
                     false
@@ -161,7 +161,7 @@ class RelayAccessibilityService : AccessibilityService() {
             }
             KeyEvent.KEYCODE_BACK -> {
                 if (RelayHudController.hasNotification()) {
-                    RelayBridge.dismiss()
+                    RelayBridge.hideNotification()
                     true
                 } else {
                     false

@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
@@ -23,6 +24,7 @@ import android.view.WindowInsets
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -38,6 +40,9 @@ class MainActivity : Activity() {
     private lateinit var notificationDurationSummary: TextView
     private lateinit var notificationDurationInput: EditText
     private lateinit var clearNotificationAfterReplyCheckBox: CheckBox
+    private lateinit var notificationLimitsSummary: TextView
+    private lateinit var inboxEntryLimitInput: EditText
+    private lateinit var threadMessageLimitInput: EditText
     private lateinit var inputSummary: TextView
     private lateinit var inputComboInput: EditText
     private lateinit var normalSwipeButton: Button
@@ -55,18 +60,20 @@ class MainActivity : Activity() {
     private lateinit var elevenLabsKeyInput: EditText
     private lateinit var openAiKeyMeta: TextView
     private lateinit var elevenLabsKeyMeta: TextView
-    private lateinit var diagnosticsToggleButton: Button
-    private lateinit var diagnosticsContainer: LinearLayout
-    private lateinit var activityText: TextView
+    private lateinit var diagnosticsPanel: DiagnosticsPanel
+    private lateinit var homePage: ScrollView
+    private lateinit var notificationsPage: ScrollView
+    private lateinit var speechPage: ScrollView
+    private lateinit var homeTabButton: TextView
+    private lateinit var notificationsTabButton: TextView
+    private lateinit var speechTabButton: TextView
 
     private var runtimePermissionRequestInFlight = false
     private var authRequestInFlight = false
     private var autoAuthAttempted = false
     private var autoReauthAttempted = false
-    private var openAiKeyVisible = false
-    private var elevenLabsKeyVisible = false
     private var apiKeysVisible = false
-    private var diagnosticsVisible = false
+    private var selectedTab = AppTab.HOME
 
     private val pollStatus = object : Runnable {
         override fun run() {
@@ -121,20 +128,55 @@ class MainActivity : Activity() {
         toastLine(notice)
     }
 
-    private fun buildContent(): ScrollView {
+    private fun buildContent(): LinearLayout {
+        val contentHost = FrameLayout(this).apply {
+            setBackgroundColor(COLOR_APP_BG)
+        }
+        homePage = page {
+            addView(header("Rokid Relay"), matchWrap())
+            addSetupPanel()
+            addDiagnosticsPanel()
+        }
+        notificationsPage = page {
+            addView(header("Notifications"), matchWrap())
+            addNotificationsPanel()
+        }
+        speechPage = page {
+            addView(header("Speech"), matchWrap())
+            addSpeechPanel()
+        }
+        contentHost.addView(homePage, frameMatch())
+        contentHost.addView(notificationsPage, frameMatch())
+        contentHost.addView(speechPage, frameMatch())
+
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(COLOR_APP_BG)
+            applySystemBarPadding(0, 0, 0, 0)
+            addView(contentHost, LinearLayout.LayoutParams(match(), 0, 1f))
+            addView(bottomNav(), LinearLayout.LayoutParams(match(), wrap()))
+            selectTab(AppTab.HOME)
+        }
+    }
+
+    private fun page(build: LinearLayout.() -> Unit): ScrollView {
         val horizontalPadding = dp(18)
         val topPadding = dp(16)
         val bottomPadding = dp(22)
-
-        val root = LinearLayout(this).apply {
+        val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(horizontalPadding, topPadding, horizontalPadding, bottomPadding)
-            applySystemBarPadding(horizontalPadding, topPadding, horizontalPadding, bottomPadding)
+            build()
         }
+        return ScrollView(this).apply {
+            setBackgroundColor(COLOR_APP_BG)
+            isFillViewport = true
+            addView(content, matchWrap())
+        }
+    }
 
-        root.addView(header(), matchWrap())
-
-        root.addView(panel("Setup") {
+    private fun LinearLayout.addSetupPanel() {
+        addView(panel("Setup") {
             setupRows = LinearLayout(this@MainActivity).apply {
                 orientation = LinearLayout.VERTICAL
             }
@@ -144,37 +186,48 @@ class MainActivity : Activity() {
             }
             addView(noticeText, matchWrap())
         })
+    }
 
-        root.addView(panel("Notifications") {
+    private fun LinearLayout.addNotificationsPanel() {
+        addView(panel("Popup") {
             notificationDurationSummary = bodyText()
             addView(notificationDurationSummary, matchWrap())
-            addView(label("Popup duration"), matchWrap(top = 14))
+            addView(label("Duration"), matchWrap(top = 14))
             addView(notificationDurationEditor(), matchWrap(top = 8))
             clearNotificationAfterReplyCheckBox = CheckBox(this@MainActivity).apply {
                 text = "Clear phone notification after reply"
                 textSize = 12.5f
                 includeFontPadding = false
                 setTextColor(COLOR_TEXT)
-                buttonTintList = android.content.res.ColorStateList.valueOf(COLOR_PHOSPHOR)
+                buttonTintList = ColorStateList.valueOf(COLOR_PHOSPHOR)
                 setOnClickListener {
                     saveClearNotificationAfterReply(isChecked)
                 }
             }
             addView(clearNotificationAfterReplyCheckBox, matchWrap(top = 12))
-            addView(rule(), matchWrap(top = 14))
-            addView(label("Glasses input"), matchWrap(top = 12))
+            notificationLimitsSummary = bodyText()
+            addView(notificationLimitsSummary, matchWrap(top = 16))
+            addView(label("Inbox entries"), matchWrap(top = 14))
+            addView(inboxEntryLimitEditor(), matchWrap(top = 8))
+            addView(label("Messages per thread"), matchWrap(top = 14))
+            addView(threadMessageLimitEditor(), matchWrap(top = 8))
+        })
+
+        addView(panel("Glasses Input") {
             inputSummary = bodyText()
-            addView(inputSummary, matchWrap(top = 8))
+            addView(inputSummary, matchWrap())
             addView(label("Inbox combo"), matchWrap(top = 14))
             addView(inputComboEditor(), matchWrap(top = 8))
             addView(label("Swipe input"), matchWrap(top = 14))
             addView(swipeModeSelector(), matchWrap(top = 8))
         })
+    }
 
-        root.addView(panel("Speech") {
+    private fun LinearLayout.addSpeechPanel() {
+        addView(panel("Engine") {
             sttSummary = bodyText()
             addView(sttSummary, matchWrap())
-            addView(label("Engine"), matchWrap(top = 14))
+            addView(label("Mode"), matchWrap(top = 14))
             addView(modeSelector(), matchWrap(top = 8))
 
             apiChoiceContainer = LinearLayout(this@MainActivity).apply {
@@ -195,12 +248,14 @@ class MainActivity : Activity() {
                 addView(modelButtonsContainer, matchWrap(top = 8))
             }
             addView(modelChoiceContainer, matchWrap())
+        })
 
+        addView(panel("API Keys") {
             apiKeysToggleButton = textButton("Manage API keys") {
                 apiKeysVisible = !apiKeysVisible
                 renderStatus()
             }
-            addView(apiKeysToggleButton, matchWrap(top = 12))
+            addView(apiKeysToggleButton, matchWrap())
 
             apiKeysContainer = LinearLayout(this@MainActivity).apply {
                 orientation = LinearLayout.VERTICAL
@@ -210,8 +265,6 @@ class MainActivity : Activity() {
                 title = "OpenAI",
                 hint = "sk-...",
                 kind = SpeechToTextCredentialKind.OPENAI,
-                isVisible = { openAiKeyVisible },
-                setVisible = { openAiKeyVisible = it },
                 setInput = { openAiKeyInput = it },
                 setMeta = { openAiKeyMeta = it },
             )
@@ -219,8 +272,6 @@ class MainActivity : Activity() {
                 title = "ElevenLabs",
                 hint = "xi-...",
                 kind = SpeechToTextCredentialKind.ELEVENLABS,
-                isVisible = { elevenLabsKeyVisible },
-                setVisible = { elevenLabsKeyVisible = it },
                 setInput = { elevenLabsKeyInput = it },
                 setMeta = { elevenLabsKeyMeta = it },
             )
@@ -228,73 +279,98 @@ class MainActivity : Activity() {
             apiKeysContainer.addView(elevenLabsKeyBlock, matchWrap(top = 12))
             addView(apiKeysContainer, matchWrap())
         })
-
-        root.addView(panel("Diagnostics") {
-            diagnosticsToggleButton = textButton("Show diagnostics") {
-                diagnosticsVisible = !diagnosticsVisible
-                updateDiagnosticsVisibility()
-            }
-            addView(diagnosticsToggleButton, matchWrap(top = 12))
-
-            diagnosticsContainer = LinearLayout(this@MainActivity).apply {
-                orientation = LinearLayout.VERTICAL
-                visibility = View.GONE
-            }
-            diagnosticsContainer.addView(buttonRow(
-                smallButton("Test notification", ButtonTone.Secondary) {
-                    TestNotificationReceiver.postTestNotification(this@MainActivity)
-                    renderStatus()
-                },
-                smallButton("Long test", ButtonTone.Secondary) {
-                    TestNotificationReceiver.postTestNotification(
-                        this@MainActivity,
-                        "Long message de test pour Rokid Relay. Il doit rester lisible sur les lunettes sans prendre tout l'ecran: " +
-                            "on garde quelques lignes utiles, puis le reste est tronque proprement. Cette phrase ajoute volontairement " +
-                            "du contenu pour verifier l'ellipse, la hauteur maximale et le confort en notification reelle.",
-                    )
-                    renderStatus()
-                },
-            ), matchWrap(top = 10))
-            diagnosticsContainer.addView(buttonRow(
-                smallButton("Burst test", ButtonTone.Secondary) {
-                    TestNotificationReceiver.postBurstTestNotification(this@MainActivity)
-                    renderStatus()
-                },
-                smallButton("Second thread", ButtonTone.Secondary) {
-                    TestNotificationReceiver.postSecondThreadTestNotification(this@MainActivity)
-                    renderStatus()
-                },
-            ), matchWrap(top = 8))
-            diagnosticsContainer.addView(rule(), matchWrap(top = 14))
-            diagnosticsContainer.addView(label("Last activity"), matchWrap(top = 12))
-            activityText = bodyText().apply {
-                typeface = Typeface.MONOSPACE
-                textSize = 12f
-            }
-            diagnosticsContainer.addView(activityText, matchWrap(top = 8))
-            addView(diagnosticsContainer, matchWrap())
-        })
-
-        return ScrollView(this).apply {
-            setBackgroundColor(COLOR_APP_BG)
-            isFillViewport = true
-            addView(root, matchWrap())
-        }
     }
 
-    private fun header(): LinearLayout =
+    private fun LinearLayout.addDiagnosticsPanel() {
+        diagnosticsPanel = DiagnosticsPanel(
+            context = this@MainActivity,
+            onStatusChanged = { renderStatus() },
+            onNotice = { toastLine(it) },
+        )
+        addView(diagnosticsPanel, matchWrap(top = 16))
+    }
+
+    private fun header(title: String): LinearLayout =
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, dp(6), 0, dp(4))
+            setPadding(0, dp(6), 0, dp(2))
             addView(TextView(this@MainActivity).apply {
-                text = "Rokid Relay"
+                text = title
                 textSize = 24f
                 typeface = Typeface.DEFAULT_BOLD
                 includeFontPadding = false
                 setTextColor(COLOR_TEXT)
             }, matchWrap())
         }
+
+    private fun bottomNav(): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(6), dp(12), dp(10))
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+                setPadding(dp(8), dp(5), dp(8), dp(6))
+                background = roundedRect(COLOR_PANEL, COLOR_STROKE, radius = 20)
+                homeTabButton = tabButton(AppTab.HOME)
+                notificationsTabButton = tabButton(AppTab.NOTIFICATIONS)
+                speechTabButton = tabButton(AppTab.SPEECH)
+                addView(homeTabButton, LinearLayout.LayoutParams(0, dp(TAB_HEIGHT_DP), 1f))
+                addView(notificationsTabButton, LinearLayout.LayoutParams(0, dp(TAB_HEIGHT_DP), 1f).apply {
+                    leftMargin = dp(6)
+                    rightMargin = dp(6)
+                })
+                addView(speechTabButton, LinearLayout.LayoutParams(0, dp(TAB_HEIGHT_DP), 1f))
+            }, LinearLayout.LayoutParams(match(), wrap()))
+        }
+
+    private fun tabButton(tab: AppTab): TextView =
+        TextView(this).apply {
+            text = tab.label
+            textSize = 11.5f
+            typeface = Typeface.DEFAULT_BOLD
+            includeFontPadding = false
+            gravity = Gravity.CENTER
+            compoundDrawablePadding = dp(3)
+            setSingleLine(true)
+            ellipsize = TextUtils.TruncateAt.END
+            setPadding(dp(4), dp(4), dp(4), dp(3))
+            minHeight = dp(TAB_HEIGHT_DP)
+            setOnClickListener { selectTab(tab) }
+        }
+
+    private fun selectTab(tab: AppTab) {
+        selectedTab = tab
+        if (::homePage.isInitialized) homePage.visibility = if (tab == AppTab.HOME) View.VISIBLE else View.GONE
+        if (::notificationsPage.isInitialized) {
+            notificationsPage.visibility = if (tab == AppTab.NOTIFICATIONS) View.VISIBLE else View.GONE
+        }
+        if (::speechPage.isInitialized) speechPage.visibility = if (tab == AppTab.SPEECH) View.VISIBLE else View.GONE
+        updateTabButtons()
+    }
+
+    private fun updateTabButtons() {
+        if (::homeTabButton.isInitialized) styleTabButton(homeTabButton, AppTab.HOME)
+        if (::notificationsTabButton.isInitialized) styleTabButton(notificationsTabButton, AppTab.NOTIFICATIONS)
+        if (::speechTabButton.isInitialized) styleTabButton(speechTabButton, AppTab.SPEECH)
+    }
+
+    private fun styleTabButton(button: TextView, tab: AppTab) {
+        val selected = selectedTab == tab
+        val color = if (selected) COLOR_PHOSPHOR else COLOR_MUTED
+        button.setTextColor(color)
+        button.background = roundedRect(
+            if (selected) COLOR_SELECTED else Color.TRANSPARENT,
+            if (selected) COLOR_PHOSPHOR_DIM else Color.TRANSPARENT,
+            radius = 14,
+            strokeWidth = if (selected) 1 else 0,
+        )
+        val icon = getDrawable(tab.iconRes)?.mutate()
+        icon?.setTint(color)
+        icon?.setBounds(0, 0, dp(TAB_ICON_DP), dp(TAB_ICON_DP))
+        button.setCompoundDrawables(null, icon, null, null)
+    }
 
     private fun panel(title: String, build: LinearLayout.() -> Unit): LinearLayout =
         LinearLayout(this).apply {
@@ -308,8 +384,9 @@ class MainActivity : Activity() {
                 includeFontPadding = false
                 setTextColor(COLOR_TEXT)
             }, matchWrap())
+            addView(View(this@MainActivity), LinearLayout.LayoutParams(match(), dp(8)))
             build()
-            layoutParams = matchWrap(top = 12)
+            layoutParams = matchWrap(top = 16)
         }
 
     private fun setupRow(
@@ -446,8 +523,6 @@ class MainActivity : Activity() {
         title: String,
         hint: String,
         kind: SpeechToTextCredentialKind,
-        isVisible: () -> Boolean,
-        setVisible: (Boolean) -> Unit,
         setInput: (EditText) -> Unit,
         setMeta: (TextView) -> Unit,
     ): LinearLayout =
@@ -469,23 +544,10 @@ class MainActivity : Activity() {
 
             val input = keyInput(hint)
             setInput(input)
-            setApiKeyVisibility(input, isVisible())
-
-            lateinit var toggle: Button
-            toggle = smallButton(if (isVisible()) "Hide" else "Show", ButtonTone.Secondary) {
-                setVisible(!isVisible())
-                setApiKeyVisibility(input, isVisible())
-                toggle.text = if (isVisible()) "Hide" else "Show"
-            }
-
-            addView(LinearLayout(this@MainActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                addView(input, LinearLayout.LayoutParams(0, dp(42), 1f))
-                addView(toggle, LinearLayout.LayoutParams(dp(82), dp(42)).apply {
-                    leftMargin = dp(8)
-                })
-            }, matchWrap(top = 8))
+            setApiKeyInputMode(input)
+            addView(input, LinearLayout.LayoutParams(match(), dp(42)).apply {
+                topMargin = dp(8)
+            })
 
             val provider = when (kind) {
                 SpeechToTextCredentialKind.OPENAI -> "OpenAI"
@@ -594,12 +656,8 @@ class MainActivity : Activity() {
             background = inputBackground()
         }
 
-    private fun setApiKeyVisibility(input: EditText, visible: Boolean) {
-        input.inputType = InputType.TYPE_CLASS_TEXT or if (visible) {
-            InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
-        } else {
-            InputType.TYPE_TEXT_VARIATION_PASSWORD
-        }
+    private fun setApiKeyInputMode(input: EditText) {
+        input.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
         input.typeface = Typeface.MONOSPACE
         input.setSingleLine(true)
         input.setSelection(input.text.length)
@@ -710,6 +768,21 @@ class MainActivity : Activity() {
             }
         }
 
+        if (::notificationLimitsSummary.isInitialized) {
+            val store = NotificationSettingsStore(this)
+            val inboxLimit = store.inboxEntryLimit()
+            val threadLimit = store.threadMessageLimit()
+            notificationLimitsSummary.text =
+                "Inbox keeps up to $inboxLimit entries. Threads keep up to $threadLimit messages when Android provides them."
+            notificationLimitsSummary.setTextColor(COLOR_MUTED)
+            if (::inboxEntryLimitInput.isInitialized && !inboxEntryLimitInput.hasFocus()) {
+                inboxEntryLimitInput.setText(inboxLimit.toString())
+            }
+            if (::threadMessageLimitInput.isInitialized && !threadMessageLimitInput.hasFocus()) {
+                threadMessageLimitInput.setText(threadLimit.toString())
+            }
+        }
+
         if (::inputSummary.isInitialized) {
             val inputStore = RelayInputSettingsStore(this)
             val combo = inputStore.inputCombo()
@@ -734,20 +807,8 @@ class MainActivity : Activity() {
         updateSpeechChoiceButtons(selectedEngine)
         updateApiKeys(selectedEngine, openAiLabel, elevenLabsLabel)
 
-        if (::activityText.isInitialized) {
-            activityText.setTextColor(COLOR_TEXT)
-            activityText.text = buildString {
-                appendLine("Event: ${snap.lastStatus}")
-                appendLine("Voice: ${snap.voiceRoute} / ${snap.sttEngine}")
-                appendLine("CXR-L: ${if (snap.cxrConnected) "connected" else "disconnected"}")
-                appendLine("Glasses BT: ${if (snap.glassConnected) "connected" else "waiting"}")
-                appendLine("Glasses app: ${snap.bootstrapState}")
-                appendLine("Mic foreground: ${if (RelayService.microphoneForegroundActive) "active" else "off"}")
-                appendLine("CXR audio: ${displayBytes(snap.cxrAudioBytes)} avg=${snap.vadAverageAbs} peak=${snap.vadPeakAbs} speech=${snap.vadSpeechDetected}")
-                if (snap.lastVoiceError.isNotBlank()) appendLine("Voice error: ${snap.lastVoiceError}")
-                appendLine("Sent: ${displayMessage(snap.lastOutgoingReply)}")
-                append("Received: ${displayMessage(snap.lastDeliveredReply)}")
-            }
+        if (::diagnosticsPanel.isInitialized) {
+            diagnosticsPanel.render(snap)
         }
     }
 
@@ -861,6 +922,76 @@ class MainActivity : Activity() {
         )
     }
 
+    private fun inboxEntryLimitEditor(): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            inboxEntryLimitInput = numberInput(NotificationSettingsStore.DEFAULT_INBOX_ENTRY_LIMIT.toString()).apply {
+                setText(NotificationSettingsStore(this@MainActivity).inboxEntryLimit().toString())
+            }
+            addView(inboxEntryLimitInput, LinearLayout.LayoutParams(0, dp(42), 1f))
+            addView(smallButton("OK", ButtonTone.Primary) {
+                saveInboxEntryLimit()
+            }, LinearLayout.LayoutParams(dp(82), dp(42)).apply {
+                leftMargin = dp(8)
+            })
+        }
+
+    private fun threadMessageLimitEditor(): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            threadMessageLimitInput = numberInput(NotificationSettingsStore.DEFAULT_THREAD_MESSAGE_LIMIT.toString()).apply {
+                setText(NotificationSettingsStore(this@MainActivity).threadMessageLimit().toString())
+            }
+            addView(threadMessageLimitInput, LinearLayout.LayoutParams(0, dp(42), 1f))
+            addView(smallButton("OK", ButtonTone.Primary) {
+                saveThreadMessageLimit()
+            }, LinearLayout.LayoutParams(dp(82), dp(42)).apply {
+                leftMargin = dp(8)
+            })
+        }
+
+    private fun saveInboxEntryLimit() {
+        val raw = inboxEntryLimitInput.text.toString().trim()
+        val limit = raw.toIntOrNull()
+        if (limit == null) {
+            toastLine("Enter an inbox limit from ${NotificationSettingsStore.MIN_INBOX_ENTRY_LIMIT} to ${NotificationSettingsStore.MAX_INBOX_ENTRY_LIMIT}.")
+            return
+        }
+        val clamped = limit.coerceIn(
+            NotificationSettingsStore.MIN_INBOX_ENTRY_LIMIT,
+            NotificationSettingsStore.MAX_INBOX_ENTRY_LIMIT,
+        )
+        NotificationSettingsStore(this).saveInboxEntryLimit(clamped)
+        inboxEntryLimitInput.setText(clamped.toString())
+        inboxEntryLimitInput.clearFocus()
+        RelayBridge.sendSettings()
+        RelayBridge.sendInbox()
+        renderStatus()
+        toastLine("Inbox limit saved: $clamped")
+    }
+
+    private fun saveThreadMessageLimit() {
+        val raw = threadMessageLimitInput.text.toString().trim()
+        val limit = raw.toIntOrNull()
+        if (limit == null) {
+            toastLine("Enter a message limit from ${NotificationSettingsStore.MIN_THREAD_MESSAGE_LIMIT} to ${NotificationSettingsStore.MAX_THREAD_MESSAGE_LIMIT}.")
+            return
+        }
+        val clamped = limit.coerceIn(
+            NotificationSettingsStore.MIN_THREAD_MESSAGE_LIMIT,
+            NotificationSettingsStore.MAX_THREAD_MESSAGE_LIMIT,
+        )
+        NotificationSettingsStore(this).saveThreadMessageLimit(clamped)
+        threadMessageLimitInput.setText(clamped.toString())
+        threadMessageLimitInput.clearFocus()
+        RelayBridge.sendSettings()
+        NotificationControl.refreshActiveNotifications()
+        renderStatus()
+        toastLine("Thread message limit saved: $clamped")
+    }
+
     private fun inputComboEditor(): LinearLayout =
         LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -933,14 +1064,6 @@ class MainActivity : Activity() {
             radius = 8,
             strokeWidth = if (isSelected) 2 else 1,
         )
-    }
-
-    private fun updateDiagnosticsVisibility() {
-        if (!::diagnosticsContainer.isInitialized) return
-        diagnosticsContainer.visibility = if (diagnosticsVisible) View.VISIBLE else View.GONE
-        if (::diagnosticsToggleButton.isInitialized) {
-            diagnosticsToggleButton.text = if (diagnosticsVisible) "Hide diagnostics" else "Show diagnostics"
-        }
     }
 
     private fun defaultApiEngine(): SpeechToTextEngine =
@@ -1133,26 +1256,19 @@ class MainActivity : Activity() {
             noticeText.setTextColor(COLOR_PHOSPHOR)
             noticeText.text = text
         }
-        if (::activityText.isInitialized) {
-            activityText.setTextColor(COLOR_DANGER)
-            activityText.text = text
+        if (::diagnosticsPanel.isInitialized) {
+            diagnosticsPanel.showNotice(text)
         }
     }
-
-    private fun displayMessage(text: String): String {
-        val oneLine = text.replace('\n', ' ').replace('\r', ' ').trim()
-        if (oneLine.isBlank()) return "-"
-        return if (oneLine.length <= 160) oneLine else oneLine.take(157) + "..."
-    }
-
-    private fun displayBytes(value: Long): String =
-        when {
-            value >= 1_000_000L -> "${value / 1_000_000L} MB"
-            value >= 1_000L -> "${value / 1_000L} KB"
-            else -> "$value B"
-        }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    private fun match(): Int = ViewGroup.LayoutParams.MATCH_PARENT
+
+    private fun frameMatch() = FrameLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        ViewGroup.LayoutParams.MATCH_PARENT,
+    )
 
     private fun matchWrap(top: Int = 0) = LinearLayout.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT,
@@ -1178,6 +1294,12 @@ class MainActivity : Activity() {
         API("API"),
     }
 
+    private enum class AppTab(val label: String, val iconRes: Int) {
+        HOME("Home", R.drawable.ic_tab_home),
+        NOTIFICATIONS("Notifications", R.drawable.ic_tab_notifications),
+        SPEECH("Speech", R.drawable.ic_tab_speech),
+    }
+
     private companion object {
         val COLOR_APP_BG: Int = Color.rgb(4, 10, 6)
         val COLOR_PANEL: Int = Color.rgb(8, 18, 11)
@@ -1197,5 +1319,7 @@ class MainActivity : Activity() {
         val COLOR_DANGER: Int = Color.rgb(255, 134, 123)
         val COLOR_DANGER_BG: Int = Color.rgb(37, 16, 15)
         val COLOR_DANGER_PRESSED: Int = Color.rgb(52, 23, 21)
+        const val TAB_HEIGHT_DP = 52
+        const val TAB_ICON_DP = 18
     }
 }

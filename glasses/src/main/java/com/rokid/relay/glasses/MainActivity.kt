@@ -58,7 +58,7 @@ class MainActivity : Activity() {
                     RelayHudController.isVoiceActive() -> RelayBridge.cancelVoice()
                     RelayHudController.isInboxDetailOpen() -> RelayBridge.startVoice()
                     RelayHudController.isInboxOpen() -> RelayHudController.openInboxDetail()
-                    RelayHudController.hasNotification() -> RelayBridge.dismiss()
+                    RelayHudController.hasNotification() -> RelayBridge.hideNotification()
                     else -> openAccessibilitySettings()
                 }
                 true
@@ -69,7 +69,7 @@ class MainActivity : Activity() {
                     RelayHudController.backInInbox()
                     true
                 } else if (RelayHudController.hasNotification()) {
-                    RelayBridge.dismiss()
+                    RelayBridge.hideNotification()
                     true
                 } else {
                     super.onKeyDown(keyCode, event)

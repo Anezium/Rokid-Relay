@@ -14,14 +14,14 @@ object NotificationTextPager {
         val current = ArrayDeque<String>()
         var currentLines = 0
 
-        messages.asReversed().forEach { message ->
+        messages.forEach { message ->
             val messageLines = estimatedVisualLines(message)
             if (current.isNotEmpty() && currentLines + messageLines > MAX_VISUAL_LINES_PER_PAGE) {
                 chunks += current.joinToString("\n")
                 current.clear()
                 currentLines = 0
             }
-            current.addFirst(message)
+            current.addLast(message)
             currentLines += messageLines
             if (currentLines >= MAX_VISUAL_LINES_PER_PAGE) {
                 chunks += current.joinToString("\n")

@@ -21,6 +21,7 @@ object Constants {
     const val EXTRA_TEST_LONG = "rokid_relay_test_long"
     const val EXTRA_TEST_ID = "rokid_relay_test_id"
     const val EXTRA_TEST_COUNT = "rokid_relay_test_count"
+    const val EXTRA_TEST_THREAD_INDEX = "rokid_relay_test_thread_index"
 
     const val PREFS = "rokid_relay"
     const val PREF_AUTH_TOKEN = "auth_token"
@@ -31,6 +32,8 @@ object Constants {
     const val PREF_STT_ELEVENLABS_LABEL = "stt_elevenlabs_label"
     const val PREF_NOTIFICATION_POPUP_DURATION_MS = "notification_popup_duration_ms"
     const val PREF_CLEAR_PHONE_NOTIFICATION_AFTER_REPLY = "clear_phone_notification_after_reply"
+    const val PREF_INBOX_ENTRY_LIMIT = "inbox_entry_limit"
+    const val PREF_THREAD_MESSAGE_LIMIT = "thread_message_limit"
     const val PREF_INPUT_COMBO = "input_combo"
     const val PREF_SWIPE_MODE = "swipe_mode"
 

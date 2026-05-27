@@ -34,17 +34,20 @@ object RelayHudController {
     private val notificationShownListeners = LinkedHashSet<() -> Unit>()
     private val stateListeners = LinkedHashSet<(State) -> Unit>()
     private var notificationAutoHideRunnable: Runnable? = null
+    private var emptyInboxAutoHideRunnable: Runnable? = null
     private val clearSentResultRunnable = Runnable {
         update {
             if (replyOk && voiceState == "idle") {
+                val closeEmptyInbox = inboxVisible && inbox.isEmpty()
                 copy(
                     notification = null,
                     resultLine = "",
                     replyOk = false,
                     voicePartial = "",
                     transientLine = "",
-                    inboxDetail = if (inboxVisible && inbox.isEmpty()) false else inboxDetail,
-                    inboxDetailPage = if (inboxVisible && inbox.isEmpty()) 0 else inboxDetailPage,
+                    inboxVisible = if (closeEmptyInbox) false else inboxVisible,
+                    inboxDetail = if (closeEmptyInbox) false else inboxDetail,
+                    inboxDetailPage = if (closeEmptyInbox) 0 else inboxDetailPage,
                 )
             } else {
                 this
@@ -96,6 +99,7 @@ object RelayHudController {
 
     fun showNotification(model: RelayHudView.NotificationModel) {
         runOnMain {
+            cancelEmptyInboxAutoHide()
             main.removeCallbacks(clearSentResultRunnable)
             val shouldNotify = state.notification != model
             state = state.copy(
@@ -175,6 +179,13 @@ object RelayHudController {
                 },
             )
         }
+        runOnMain {
+            if (items.isEmpty()) {
+                scheduleEmptyInboxAutoHide()
+            } else {
+                cancelEmptyInboxAutoHide()
+            }
+        }
     }
 
     fun openInbox() {
@@ -190,9 +201,13 @@ object RelayHudController {
                 voicePartial = "",
             )
         }
+        runOnMain {
+            if (state.inbox.isEmpty()) scheduleEmptyInboxAutoHide() else cancelEmptyInboxAutoHide()
+        }
     }
 
     fun closeInbox() {
+        cancelEmptyInboxAutoHide()
         update {
             copy(
                 inboxVisible = false,
@@ -426,10 +441,37 @@ object RelayHudController {
         notificationAutoHideRunnable = null
     }
 
+    private fun scheduleEmptyInboxAutoHide() {
+        cancelEmptyInboxAutoHide()
+        if (!state.inboxVisible || state.inbox.isNotEmpty() || state.voiceState != "idle" || state.replyOk) return
+        val runnable = Runnable {
+            update {
+                if (inboxVisible && inbox.isEmpty() && voiceState == "idle" && !replyOk) {
+                    copy(
+                        inboxVisible = false,
+                        inboxDetail = false,
+                        inboxDetailPage = 0,
+                        transientLine = "",
+                    )
+                } else {
+                    this
+                }
+            }
+        }
+        emptyInboxAutoHideRunnable = runnable
+        main.postDelayed(runnable, EMPTY_INBOX_HOLD_MS)
+    }
+
+    private fun cancelEmptyInboxAutoHide() {
+        emptyInboxAutoHideRunnable?.let { main.removeCallbacks(it) }
+        emptyInboxAutoHideRunnable = null
+    }
+
     private fun sanitizePopupDuration(durationMs: Long): Long =
         durationMs.coerceIn(0L, MAX_NOTIFICATION_POPUP_DURATION_MS)
 
     private const val SENT_RESULT_HOLD_MS = 1_250L
+    private const val EMPTY_INBOX_HOLD_MS = 1_500L
     private const val DEFAULT_NOTIFICATION_POPUP_DURATION_MS = 5_000L
     private const val MAX_NOTIFICATION_POPUP_DURATION_MS = 300_000L
 }

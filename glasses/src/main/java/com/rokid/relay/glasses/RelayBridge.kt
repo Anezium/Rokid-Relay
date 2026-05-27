@@ -66,6 +66,10 @@ object RelayBridge {
         RelayHudController.clearNotification()
     }
 
+    fun hideNotification() {
+        RelayHudController.clearNotification()
+    }
+
     fun cancelVoice() {
         sendCommand("cancel_voice")
         RelayHudController.setVoice("idle", "")

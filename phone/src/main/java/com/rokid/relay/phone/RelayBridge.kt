@@ -153,7 +153,10 @@ object RelayBridge {
     }
 
     fun sendInbox() {
-        val items = ReplyRepository.listPending()
+        val settings = appContext?.let { NotificationSettingsStore(it) }
+        val items = ReplyRepository.listPending(
+            settings?.inboxEntryLimit() ?: NotificationSettingsStore.DEFAULT_INBOX_ENTRY_LIMIT,
+        )
         val notifications = JSONArray()
         items.forEach { reply ->
             notifications.put(
@@ -336,12 +339,17 @@ object RelayBridge {
         val context = appContext
         if (context == null) {
             put("notificationPopupDurationMs", NotificationSettingsStore.DEFAULT_POPUP_DURATION_MS)
+            put("inboxEntryLimit", NotificationSettingsStore.DEFAULT_INBOX_ENTRY_LIMIT)
+            put("threadMessageLimit", NotificationSettingsStore.DEFAULT_THREAD_MESSAGE_LIMIT)
             put("inputCombo", RelayInputSettingsStore.DEFAULT_COMBO)
             put("swipeMode", RelayInputSettingsStore.DEFAULT_SWIPE_MODE)
             return this
         }
+        val notificationStore = NotificationSettingsStore(context)
         val inputStore = RelayInputSettingsStore(context)
-        put("notificationPopupDurationMs", NotificationSettingsStore(context).popupDurationMs())
+        put("notificationPopupDurationMs", notificationStore.popupDurationMs())
+        put("inboxEntryLimit", notificationStore.inboxEntryLimit())
+        put("threadMessageLimit", notificationStore.threadMessageLimit())
         put("inputCombo", inputStore.inputCombo())
         put("swipeMode", inputStore.swipeMode())
         return this
