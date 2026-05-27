@@ -141,14 +141,18 @@ object RelayHudController {
     fun setInbox(items: List<RelayHudView.NotificationModel>) {
         update {
             val selectedId = inbox.getOrNull(inboxIndex)?.id
+            val preservedIndex = if (inboxVisible && selectedId != null) {
+                items.indexOfFirst { it.id == selectedId }
+            } else {
+                -1
+            }
             val nextIndex = when {
                 items.isEmpty() -> 0
-                inboxVisible && selectedId != null -> {
-                    val preservedIndex = items.indexOfFirst { it.id == selectedId }
-                    if (preservedIndex >= 0) preservedIndex else 0
-                }
+                preservedIndex >= 0 -> preservedIndex
+                inboxVisible -> inboxIndex.coerceIn(0, items.lastIndex)
                 else -> inboxIndex.coerceIn(0, items.lastIndex)
             }
+            val sameSelectedItem = preservedIndex >= 0
             val currentNotification = notification
             val refreshedNotification = currentNotification?.let { current ->
                 items.firstOrNull { it.id == current.id } ?: current
@@ -164,9 +168,8 @@ object RelayHudController {
             } else {
                 null
             }
-            val nextDetail = inboxDetail && items.isNotEmpty()
+            val nextDetail = inboxDetail && items.isNotEmpty() && sameSelectedItem
             val selectedText = items.getOrNull(nextIndex)?.text.orEmpty()
-            val sameSelectedItem = selectedId != null && items.getOrNull(nextIndex)?.id == selectedId
             copy(
                 notification = nextNotification,
                 inbox = items,
