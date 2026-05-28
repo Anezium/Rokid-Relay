@@ -30,6 +30,8 @@ object RelayBridge {
     )
 
     private const val TAG = "RokidRelayBridge"
+    private const val RECONNECT_INITIAL_DELAY_MS = 1_000L
+    private const val RECONNECT_MAX_DELAY_MS = 15_000L
     private val main = Handler(Looper.getMainLooper())
 
     @Volatile private var cxrConnected = false
@@ -46,20 +48,28 @@ object RelayBridge {
     @Volatile private var vadSpeechDetected = false
     @Volatile private var lastVoiceError = ""
     @Volatile private var bootstrapStarted = false
+    @Volatile private var authToken = ""
+    @Volatile private var pendingNotificationRetry: ReplyRepository.PendingReply? = null
+    @Volatile private var reconnectRunnable: Runnable? = null
+    private var reconnectDelayMs = RECONNECT_INITIAL_DELAY_MS
 
     private var appContext: Context? = null
     private var link: CXRLink? = null
 
     fun start(context: Context, token: String) {
         appContext = context.applicationContext
+        authToken = token
         main.post { startOnMain(context.applicationContext, token) }
     }
 
     fun stop() {
         main.post {
             VoiceController.cancel()
+            cancelReconnect()
             runCatching { link?.disconnect() }
             link = null
+            authToken = ""
+            pendingNotificationRetry = null
             cxrConnected = false
             glassConnected = false
             bootstrapStarted = false
@@ -137,7 +147,11 @@ object RelayBridge {
             .put("text", reply.text)
             .put("canReply", true)
             .appendUserSettings()
-        sendJson(Constants.KEY_EVENT, json)
+        if (sendJson(Constants.KEY_EVENT, json)) {
+            if (pendingNotificationRetry?.id == reply.id) pendingNotificationRetry = null
+        } else {
+            pendingNotificationRetry = reply
+        }
         sendInbox()
     }
 
@@ -212,38 +226,48 @@ object RelayBridge {
     }
 
     private fun startOnMain(context: Context, token: String) {
-        if (link == null) {
-            link = CXRLink(context).apply {
-                configCXRSession(
-                    CxrDefs.CXRSession(
-                        CxrDefs.CXRSessionType.CUSTOMAPP,
-                        Constants.CLIENT_PACKAGE,
-                    ),
-                )
-                setCXRLinkCbk(linkCallback)
-                setCXRCustomCmdCbk(commandCallback)
-            }
-        }
+        authToken = token
+        val localLink = ensureLink(context)
         bootstrapState = "waiting for glasses"
         lastStatus = "binding Hi Rokid service"
-        val bound = runCatching { link?.connect(token) == true }.getOrDefault(false)
+        val bound = runCatching { localLink.connect(token) }.getOrDefault(false)
         if (!bound) {
             lastStatus = "Hi Rokid bind failed"
             bootstrapState = "not connected"
+            scheduleReconnect("bind failed")
+        } else if (localLink.isServiceConnected()) {
+            cxrConnected = true
+            glassConnected = localLink.isGlassBtConnected()
+            maybeBootstrap()
         }
     }
 
     private val linkCallback = object : ICXRLinkCbk {
         override fun onCXRLConnected(connected: Boolean) {
             cxrConnected = connected
-            lastStatus = if (connected) "CXR-L connected" else "CXR-L disconnected"
-            if (connected) sendState()
+            if (connected) {
+                lastStatus = "CXR-L connected"
+                if (glassConnected) sendState()
+            } else {
+                glassConnected = false
+                bootstrapStarted = false
+                bootstrapState = "not connected"
+                lastStatus = "CXR-L disconnected"
+                scheduleReconnect("CXR-L disconnected")
+            }
             maybeBootstrap()
         }
 
         override fun onGlassBtConnected(connected: Boolean) {
             glassConnected = connected
             lastStatus = if (connected) "glasses connected" else "glasses disconnected"
+            if (connected) {
+                cancelReconnect()
+                sendState()
+            } else {
+                bootstrapStarted = false
+                bootstrapState = if (cxrConnected) "waiting for glasses" else "not connected"
+            }
             maybeBootstrap()
         }
 
@@ -264,10 +288,59 @@ object RelayBridge {
         }
     }
 
+    private fun ensureLink(context: Context): CXRLink =
+        link ?: CXRLink(context).apply {
+            configCXRSession(
+                CxrDefs.CXRSession(
+                    CxrDefs.CXRSessionType.CUSTOMAPP,
+                    Constants.CLIENT_PACKAGE,
+                ),
+            )
+            setCXRLinkCbk(linkCallback)
+            setCXRCustomCmdCbk(commandCallback)
+        }.also { link = it }
+
+    private fun scheduleReconnect(reason: String) {
+        if (appContext == null) return
+        if (authToken.isBlank()) return
+        if (reconnectRunnable != null) return
+        val delayMs = reconnectDelayMs
+        Log.i(TAG, "schedule CXR-L reconnect in ${delayMs}ms: $reason")
+        lastStatus = "CXR-L reconnect scheduled"
+        val runnable = Runnable {
+            reconnectRunnable = null
+            val currentContext = appContext ?: return@Runnable
+            val token = authToken
+            if (token.isBlank()) return@Runnable
+            if (cxrConnected && link?.isServiceConnected() == true) {
+                reconnectDelayMs = RECONNECT_INITIAL_DELAY_MS
+                return@Runnable
+            }
+            bootstrapStarted = false
+            bootstrapState = "reconnecting"
+            lastStatus = "reconnecting CXR-L"
+            reconnectDelayMs = (delayMs * 2).coerceAtMost(RECONNECT_MAX_DELAY_MS)
+            startOnMain(currentContext, token)
+            if (!cxrConnected) scheduleReconnect("CXR-L still disconnected")
+        }
+        reconnectRunnable = runnable
+        main.postDelayed(runnable, delayMs)
+    }
+
+    private fun cancelReconnect() {
+        reconnectRunnable?.let { main.removeCallbacks(it) }
+        reconnectRunnable = null
+        reconnectDelayMs = RECONNECT_INITIAL_DELAY_MS
+    }
+
     private fun maybeBootstrap() {
         val context = appContext ?: return
         val localLink = link ?: return
-        if (!cxrConnected || !glassConnected || bootstrapStarted) return
+        if (!cxrConnected || !glassConnected) return
+        if (bootstrapStarted) {
+            flushPendingNotification()
+            return
+        }
         bootstrapStarted = true
         bootstrapState = "starting glasses app"
         Thread {
@@ -275,10 +348,21 @@ object RelayBridge {
             bootstrapState = result
             lastStatus = result
             sendState()
+            if (result == "glasses app running" || result == "glasses app installed/updated") {
+                flushPendingNotification()
+            }
         }.apply {
             name = "RokidRelayBootstrap"
             start()
         }
+    }
+
+    private fun flushPendingNotification() {
+        val pending = pendingNotificationRetry ?: return
+        if (!cxrConnected || !glassConnected) return
+        pendingNotificationRetry = null
+        Log.i(TAG, "retrying pending notification id=${pending.id.take(8)}")
+        sendNotification(pending)
     }
 
     private fun handleCommand(json: JSONObject) {
@@ -355,14 +439,33 @@ object RelayBridge {
         return this
     }
 
-    private fun sendJson(key: String, json: JSONObject) {
-        val localLink = link ?: return
-        runCatching {
+    private fun sendJson(key: String, json: JSONObject): Boolean {
+        val localLink = link
+        if (localLink == null) {
+            markSendUnavailable("link missing", key, json)
+            return false
+        }
+        return runCatching {
             val bytes = Caps().apply { write(json.toString()) }.serialize()
-            localLink.sendCustomCmd(key, bytes)
-        }.onFailure {
+            val result = localLink.sendCustomCmd(key, bytes)
+            if (result == null || result < 0) {
+                markSendUnavailable("send returned $result", key, json)
+                false
+            } else {
+                true
+            }
+        }.getOrElse {
             Log.w(TAG, "send failed: ${it.message}")
-            lastStatus = "send failed"
+            markSendUnavailable("send exception", key, json)
+            false
+        }
+    }
+
+    private fun markSendUnavailable(reason: String, key: String, json: JSONObject) {
+        Log.w(TAG, "$reason key=$key type=${json.optString("type")}")
+        lastStatus = "send failed"
+        if (!cxrConnected || link?.isServiceConnected() != true) {
+            scheduleReconnect(reason)
         }
     }
 
