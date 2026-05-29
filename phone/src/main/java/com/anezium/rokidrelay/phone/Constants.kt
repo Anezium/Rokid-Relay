@@ -36,6 +36,7 @@ object Constants {
     const val PREF_THREAD_MESSAGE_LIMIT = "thread_message_limit"
     const val PREF_INPUT_COMBO = "input_combo"
     const val PREF_SWIPE_MODE = "swipe_mode"
+    const val PREF_NOTIFICATION_OVERLAY_Y_OFFSET_DP = "notification_overlay_y_offset_dp"
     const val PREF_CLIENT_APK_FINGERPRINT = "client_apk_fingerprint"
 
     const val TEST_NOTIFICATION_ID = 7202

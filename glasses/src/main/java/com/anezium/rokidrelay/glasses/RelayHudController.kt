@@ -25,6 +25,7 @@ object RelayHudController {
         val transientLine: String = "",
         val accessibilityEnabled: Boolean = false,
         val notificationPopupDurationMs: Long = DEFAULT_NOTIFICATION_POPUP_DURATION_MS,
+        val notificationOverlayYOffsetDp: Int = NotificationOverlaySettings.DEFAULT_Y_OFFSET_DP,
         val inputCombo: String = RelayInputSettings.DEFAULT_COMBO,
         val swipeMode: String = RelayInputSettings.DEFAULT_SWIPE_MODE,
     )
@@ -125,6 +126,12 @@ object RelayHudController {
             state = state.copy(notificationPopupDurationMs = sanitizePopupDuration(durationMs))
             dispatchState()
             scheduleNotificationAutoHide(state.notification)
+        }
+    }
+
+    fun setNotificationOverlayYOffset(value: Int) {
+        update {
+            copy(notificationOverlayYOffsetDp = NotificationOverlaySettings.sanitizeYOffsetDp(value))
         }
     }
 
@@ -379,6 +386,9 @@ object RelayHudController {
 
     fun inputCombo(): String =
         state.inputCombo
+
+    fun notificationOverlayYOffsetDp(): Int =
+        state.notificationOverlayYOffsetDp
 
     fun isInputSourceEnabled(source: RelayInputSource): Boolean =
         RelayInputSettings.sourceEnabled(state.swipeMode, source)

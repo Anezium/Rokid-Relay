@@ -23,6 +23,7 @@ class RelayAccessibilityService : AccessibilityService() {
     private val main = Handler(Looper.getMainLooper())
     private val notificationWakeListener: () -> Unit = { wakeScreen() }
     private val replyWakeListener: (RelayHudController.State) -> Unit = { state ->
+        applyOverlayPosition(state.notificationOverlayYOffsetDp)
         if (
             state.voiceState == "listening" ||
             state.voiceState == "recognizing" ||
@@ -51,6 +52,8 @@ class RelayAccessibilityService : AccessibilityService() {
     }
     private var windowManager: WindowManager? = null
     private var overlay: RelayHudView? = null
+    private var overlayParams: WindowManager.LayoutParams? = null
+    private var overlayYOffsetDp = NotificationOverlaySettings.DEFAULT_Y_OFFSET_DP
     private var replyWakeLock: PowerManager.WakeLock? = null
     private var audioManager: AudioManager? = null
     private var commandVolume: VolumeSnapshot? = null
@@ -94,10 +97,11 @@ class RelayAccessibilityService : AccessibilityService() {
         serviceInfo = serviceInfo.apply {
             flags = flags or AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
         }
+        RelayHudController.setNotificationOverlayYOffset(NotificationOverlaySettings.yOffsetDp(this))
         RelayHudController.refreshAccessibility(this)
         RelayHudController.addNotificationShownListener(notificationWakeListener)
         RelayHudController.addStateListener(replyWakeListener)
-        RelayBridge.start()
+        RelayBridge.start(this)
         showOverlay()
     }
 
@@ -384,12 +388,14 @@ class RelayAccessibilityService : AccessibilityService() {
                 PixelFormat.TRANSLUCENT,
             ).apply {
                 gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                y = dp(14)
+                y = dp(RelayHudController.notificationOverlayYOffsetDp())
             }
             runCatching {
                 wm.addView(view, params)
                 windowManager = wm
                 overlay = view
+                overlayParams = params
+                overlayYOffsetDp = RelayHudController.notificationOverlayYOffsetDp()
                 RelayHudController.attach(view)
             }.onFailure {
                 RelayHudController.showTransient("Overlay failed: ${it.message}")
@@ -403,7 +409,24 @@ class RelayAccessibilityService : AccessibilityService() {
             RelayHudController.detach(view)
             runCatching { windowManager?.removeView(view) }
             overlay = null
+            overlayParams = null
             windowManager = null
+        }
+    }
+
+    private fun applyOverlayPosition(yOffsetDp: Int) {
+        val wm = windowManager ?: return
+        val view = overlay ?: return
+        val params = overlayParams ?: return
+        val cleanOffset = NotificationOverlaySettings.sanitizeYOffsetDp(yOffsetDp)
+        val cleanOffsetPx = dp(cleanOffset)
+        if (overlayYOffsetDp == cleanOffset && params.y == cleanOffsetPx) return
+        params.y = cleanOffsetPx
+        overlayYOffsetDp = cleanOffset
+        runCatching {
+            wm.updateViewLayout(view, params)
+        }.onFailure {
+            Log.w(TAG, "Overlay position update failed: ${it.message}")
         }
     }
 

@@ -23,8 +23,9 @@ class MainActivity : Activity() {
         hud = RelayHudView(this)
         setContentView(hud)
         RelayHudController.attach(hud)
+        RelayHudController.setNotificationOverlayYOffset(NotificationOverlaySettings.yOffsetDp(this))
         RelayHudController.refreshAccessibility(this)
-        RelayBridge.start()
+        RelayBridge.start(this)
     }
 
     override fun onResume() {

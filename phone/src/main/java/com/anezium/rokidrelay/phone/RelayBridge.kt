@@ -166,6 +166,18 @@ object RelayBridge {
         )
     }
 
+    fun saveNotificationOverlayPosition(yOffsetDp: Int): Boolean {
+        val cleanOffset = NotificationOverlayPositionStore.sanitizeYOffsetDp(yOffsetDp)
+        return sendJson(
+            Constants.KEY_EVENT,
+            JSONObject()
+                .put("version", Constants.PROTOCOL_VERSION)
+                .put("type", "save_notification_overlay_position")
+                .put("source", "phone")
+                .put("overlayYOffsetDp", cleanOffset),
+        )
+    }
+
     fun sendInbox() {
         val settings = appContext?.let { NotificationSettingsStore(it) }
         val items = ReplyRepository.listPending(

@@ -225,6 +225,8 @@ class MainActivity : Activity() {
     }
 
     private fun LinearLayout.addNotificationsPanel() {
+        addView(NotificationDisplayPanel(this@MainActivity, onNotice = { toastLine(it) }), matchWrap())
+
         addView(panel("Popup") {
             notificationDurationSummary = bodyText()
             addView(notificationDurationSummary, matchWrap())

@@ -1,5 +1,6 @@
 package com.anezium.rokidrelay.glasses
 
+import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -14,9 +15,11 @@ object RelayBridge {
 
     private val main = Handler(Looper.getMainLooper())
     private var bridge: CXRServiceBridge? = null
+    private var appContext: Context? = null
     private var lastVoiceCommandAtMs = 0L
 
-    fun start() {
+    fun start(context: Context) {
+        appContext = context.applicationContext
         if (bridge != null) {
             RelayHudController.setConnection("connected")
             requestState()
@@ -161,6 +164,16 @@ object RelayBridge {
                     ok = obj.optBoolean("ok"),
                     message = obj.optString("message"),
                 )
+            }
+            "save_notification_overlay_position" -> {
+                val rawOffset = obj.optInt(
+                    "overlayYOffsetDp",
+                    NotificationOverlaySettings.DEFAULT_Y_OFFSET_DP,
+                )
+                val savedOffset = appContext?.let { context ->
+                    NotificationOverlaySettings.saveYOffsetDp(context, rawOffset)
+                } ?: NotificationOverlaySettings.sanitizeYOffsetDp(rawOffset)
+                RelayHudController.setNotificationOverlayYOffset(savedOffset)
             }
             "notification_cleared" -> RelayHudController.clearNotification()
         }
