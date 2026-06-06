@@ -11,12 +11,26 @@ class NotificationSettingsStore(context: Context) {
     fun popupDurationSeconds(): Long =
         popupDurationMs() / 1_000L
 
+    fun fontSizeSp(): Float =
+        sanitizeFontSizeSp(
+            prefs.getFloat(
+                Constants.PREF_NOTIFICATION_FONT_SIZE_SP,
+                DEFAULT_FONT_SIZE_SP,
+            ),
+        )
+
     fun savePopupDurationMs(durationMs: Long) {
         prefs.edit().putLong(Constants.PREF_NOTIFICATION_POPUP_DURATION_MS, sanitize(durationMs)).apply()
     }
 
     fun savePopupDurationSeconds(seconds: Long) {
         savePopupDurationMs(seconds.coerceIn(0L, MAX_POPUP_DURATION_MS / 1_000L) * 1_000L)
+    }
+
+    fun saveFontSizeSp(value: Float): Float {
+        val cleanValue = sanitizeFontSizeSp(value)
+        prefs.edit().putFloat(Constants.PREF_NOTIFICATION_FONT_SIZE_SP, cleanValue).apply()
+        return cleanValue
     }
 
     fun clearPhoneNotificationAfterReply(): Boolean =
@@ -55,6 +69,9 @@ class NotificationSettingsStore(context: Context) {
     companion object {
         const val DEFAULT_POPUP_DURATION_MS = 5_000L
         const val MAX_POPUP_DURATION_MS = 300_000L
+        const val DEFAULT_FONT_SIZE_SP = 15.0f
+        const val MIN_FONT_SIZE_SP = 11.0f
+        const val MAX_FONT_SIZE_SP = 24.0f
         const val DEFAULT_CLEAR_PHONE_NOTIFICATION_AFTER_REPLY = true
         const val DEFAULT_INBOX_ENTRY_LIMIT = 16
         const val MIN_INBOX_ENTRY_LIMIT = 4
@@ -62,5 +79,12 @@ class NotificationSettingsStore(context: Context) {
         const val DEFAULT_THREAD_MESSAGE_LIMIT = 20
         const val MIN_THREAD_MESSAGE_LIMIT = 4
         const val MAX_THREAD_MESSAGE_LIMIT = 40
+
+        fun sanitizeFontSizeSp(value: Float): Float =
+            if (value.isNaN()) {
+                DEFAULT_FONT_SIZE_SP
+            } else {
+                value.coerceIn(MIN_FONT_SIZE_SP, MAX_FONT_SIZE_SP)
+            }
     }
 }

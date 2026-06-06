@@ -183,6 +183,16 @@ object RelayBridge {
         if (obj.has("notificationPopupDurationMs")) {
             RelayHudController.setNotificationPopupDuration(obj.optLong("notificationPopupDurationMs", 5_000L))
         }
+        if (obj.has("notificationFontSizeSp")) {
+            val rawFontSize = obj.optDouble(
+                "notificationFontSizeSp",
+                NotificationOverlaySettings.DEFAULT_FONT_SIZE_SP.toDouble(),
+            ).toFloat()
+            val savedFontSize = appContext?.let { context ->
+                NotificationOverlaySettings.saveFontSizeSp(context, rawFontSize)
+            } ?: NotificationOverlaySettings.sanitizeFontSizeSp(rawFontSize)
+            RelayHudController.setNotificationFontSizeSp(savedFontSize)
+        }
         RelayHudController.setInputSettings(
             combo = if (obj.has("inputCombo")) obj.optString("inputCombo") else null,
             swipeMode = if (obj.has("swipeMode")) obj.optString("swipeMode") else null,

@@ -435,6 +435,7 @@ object RelayBridge {
         val context = appContext
         if (context == null) {
             put("notificationPopupDurationMs", NotificationSettingsStore.DEFAULT_POPUP_DURATION_MS)
+            put("notificationFontSizeSp", NotificationSettingsStore.DEFAULT_FONT_SIZE_SP)
             put("inboxEntryLimit", NotificationSettingsStore.DEFAULT_INBOX_ENTRY_LIMIT)
             put("threadMessageLimit", NotificationSettingsStore.DEFAULT_THREAD_MESSAGE_LIMIT)
             put("inputCombo", RelayInputSettingsStore.DEFAULT_COMBO)
@@ -444,6 +445,7 @@ object RelayBridge {
         val notificationStore = NotificationSettingsStore(context)
         val inputStore = RelayInputSettingsStore(context)
         put("notificationPopupDurationMs", notificationStore.popupDurationMs())
+        put("notificationFontSizeSp", notificationStore.fontSizeSp())
         put("inboxEntryLimit", notificationStore.inboxEntryLimit())
         put("threadMessageLimit", notificationStore.threadMessageLimit())
         put("inputCombo", inputStore.inputCombo())

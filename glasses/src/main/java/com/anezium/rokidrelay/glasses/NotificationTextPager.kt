@@ -1,7 +1,10 @@
 package com.anezium.rokidrelay.glasses
 
 object NotificationTextPager {
-    fun pages(text: String): List<String> {
+    fun pages(
+        text: String,
+        fontSizeSp: Float = NotificationOverlaySettings.DEFAULT_FONT_SIZE_SP,
+    ): List<String> {
         val messages = text
             .replace('\r', '\n')
             .lineSequence()
@@ -15,7 +18,7 @@ object NotificationTextPager {
         var currentLines = 0
 
         messages.forEach { message ->
-            val messageLines = estimatedVisualLines(message)
+            val messageLines = estimatedVisualLines(message, fontSizeSp)
             if (current.isNotEmpty() && currentLines + messageLines > MAX_VISUAL_LINES_PER_PAGE) {
                 chunks += current.joinToString("\n")
                 current.clear()
@@ -33,17 +36,35 @@ object NotificationTextPager {
         return chunks
     }
 
-    fun page(text: String, index: Int): String {
-        val pages = pages(text)
+    fun page(
+        text: String,
+        index: Int,
+        fontSizeSp: Float = NotificationOverlaySettings.DEFAULT_FONT_SIZE_SP,
+    ): String {
+        val pages = pages(text, fontSizeSp)
         return pages[index.coerceIn(0, pages.lastIndex)]
     }
 
-    fun pageCount(text: String): Int = pages(text).size
+    fun pageCount(
+        text: String,
+        fontSizeSp: Float = NotificationOverlaySettings.DEFAULT_FONT_SIZE_SP,
+    ): Int = pages(text, fontSizeSp).size
 
-    private fun estimatedVisualLines(message: String): Int =
-        ((message.length + MAX_CHARS_PER_VISUAL_LINE - 1) / MAX_CHARS_PER_VISUAL_LINE)
+    private fun estimatedVisualLines(message: String, fontSizeSp: Float): Int {
+        val charsPerLine = charsPerVisualLine(fontSizeSp)
+        return ((message.length + charsPerLine - 1) / charsPerLine)
             .coerceIn(1, MAX_VISUAL_LINES_PER_PAGE)
+    }
+
+    private fun charsPerVisualLine(fontSizeSp: Float): Int {
+        val safeSp = NotificationOverlaySettings.sanitizeFontSizeSp(fontSizeSp)
+        return Math.round(BASE_CHARS_PER_VISUAL_LINE * BASE_FONT_SIZE_SP / safeSp)
+            .coerceIn(MIN_CHARS_PER_VISUAL_LINE, MAX_CHARS_PER_VISUAL_LINE)
+    }
 
     private const val MAX_VISUAL_LINES_PER_PAGE = 4
-    private const val MAX_CHARS_PER_VISUAL_LINE = 46
+    private const val BASE_FONT_SIZE_SP = NotificationOverlaySettings.DEFAULT_FONT_SIZE_SP
+    private const val BASE_CHARS_PER_VISUAL_LINE = 46f
+    private const val MIN_CHARS_PER_VISUAL_LINE = 28
+    private const val MAX_CHARS_PER_VISUAL_LINE = 58
 }

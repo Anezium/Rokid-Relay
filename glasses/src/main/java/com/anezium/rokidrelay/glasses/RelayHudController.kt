@@ -26,6 +26,7 @@ object RelayHudController {
         val accessibilityEnabled: Boolean = false,
         val notificationPopupDurationMs: Long = DEFAULT_NOTIFICATION_POPUP_DURATION_MS,
         val notificationOverlayYOffsetDp: Int = NotificationOverlaySettings.DEFAULT_Y_OFFSET_DP,
+        val notificationFontSizeSp: Float = NotificationOverlaySettings.DEFAULT_FONT_SIZE_SP,
         val inputCombo: String = RelayInputSettings.DEFAULT_COMBO,
         val swipeMode: String = RelayInputSettings.DEFAULT_SWIPE_MODE,
     )
@@ -135,6 +136,22 @@ object RelayHudController {
         }
     }
 
+    fun setNotificationFontSizeSp(value: Float) {
+        update {
+            val cleanValue = NotificationOverlaySettings.sanitizeFontSizeSp(value)
+            val selectedText = inbox.getOrNull(inboxIndex)?.text.orEmpty()
+            val nextDetailPage = if (inboxDetail && selectedText.isNotBlank()) {
+                inboxDetailPage.coerceIn(0, NotificationTextPager.pageCount(selectedText, cleanValue) - 1)
+            } else {
+                inboxDetailPage
+            }
+            copy(
+                notificationFontSizeSp = cleanValue,
+                inboxDetailPage = nextDetailPage,
+            )
+        }
+    }
+
     fun setInputSettings(combo: String?, swipeMode: String?) {
         runOnMain {
             state = state.copy(
@@ -183,7 +200,7 @@ object RelayHudController {
                 inboxIndex = nextIndex,
                 inboxDetail = nextDetail,
                 inboxDetailPage = if (nextDetail && sameSelectedItem) {
-                    inboxDetailPage.coerceIn(0, NotificationTextPager.pageCount(selectedText) - 1)
+                    inboxDetailPage.coerceIn(0, NotificationTextPager.pageCount(selectedText, notificationFontSizeSp) - 1)
                 } else {
                     0
                 },
@@ -274,7 +291,7 @@ object RelayHudController {
         val snapshot = state
         if (!snapshot.inboxVisible || !snapshot.inboxDetail) return false
         val selected = snapshot.inbox.getOrNull(snapshot.inboxIndex) ?: return true
-        val pageCount = NotificationTextPager.pageCount(selected.text)
+        val pageCount = NotificationTextPager.pageCount(selected.text, snapshot.notificationFontSizeSp)
         if (pageCount <= 1) return true
         val nextPage = (snapshot.inboxDetailPage + delta).coerceIn(0, pageCount - 1)
         if (nextPage == snapshot.inboxDetailPage) return true

@@ -24,6 +24,7 @@ class MainActivity : Activity() {
         setContentView(hud)
         RelayHudController.attach(hud)
         RelayHudController.setNotificationOverlayYOffset(NotificationOverlaySettings.yOffsetDp(this))
+        RelayHudController.setNotificationFontSizeSp(NotificationOverlaySettings.fontSizeSp(this))
         RelayHudController.refreshAccessibility(this)
         RelayBridge.start(this)
     }

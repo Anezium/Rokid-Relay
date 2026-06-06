@@ -98,6 +98,7 @@ class RelayAccessibilityService : AccessibilityService() {
             flags = flags or AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
         }
         RelayHudController.setNotificationOverlayYOffset(NotificationOverlaySettings.yOffsetDp(this))
+        RelayHudController.setNotificationFontSizeSp(NotificationOverlaySettings.fontSizeSp(this))
         RelayHudController.refreshAccessibility(this)
         RelayHudController.addNotificationShownListener(notificationWakeListener)
         RelayHudController.addStateListener(replyWakeListener)

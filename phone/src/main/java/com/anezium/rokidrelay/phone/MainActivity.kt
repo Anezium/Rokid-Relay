@@ -45,6 +45,7 @@ class MainActivity : Activity() {
     private lateinit var noticeText: TextView
     private lateinit var notificationDurationSummary: TextView
     private lateinit var notificationDurationInput: EditText
+    private lateinit var notificationFontSizeSummary: TextView
     private lateinit var clearNotificationAfterReplyCheckBox: CheckBox
     private lateinit var notificationLimitsSummary: TextView
     private lateinit var inboxEntryLimitInput: EditText
@@ -232,6 +233,10 @@ class MainActivity : Activity() {
             addView(notificationDurationSummary, matchWrap())
             addView(label("Duration"), matchWrap(top = 14))
             addView(notificationDurationEditor(), matchWrap(top = 8))
+            addView(label("Font size"), matchWrap(top = 14))
+            notificationFontSizeSummary = bodyText()
+            addView(notificationFontSizeSummary, matchWrap(top = 8))
+            addView(notificationFontSizeControls(), matchWrap(top = 8))
             clearNotificationAfterReplyCheckBox = CheckBox(this@MainActivity).apply {
                 text = "Clear phone notification after reply"
                 textSize = 12.5f
@@ -889,13 +894,18 @@ class MainActivity : Activity() {
         }
 
         if (::notificationDurationSummary.isInitialized) {
-            val seconds = NotificationSettingsStore(this).popupDurationSeconds()
+            val store = NotificationSettingsStore(this)
+            val seconds = store.popupDurationSeconds()
             notificationDurationSummary.text = if (seconds == 0L) {
                 "Popup stays visible until dismissed. Enter 0 to keep this behavior."
             } else {
                 "Popup hides after ${seconds}s. The notification stays available in the inbox."
             }
             notificationDurationSummary.setTextColor(COLOR_MUTED)
+            if (::notificationFontSizeSummary.isInitialized) {
+                notificationFontSizeSummary.text = "Glasses popup text: ${formatFontSizeSp(store.fontSizeSp())}"
+                notificationFontSizeSummary.setTextColor(COLOR_MUTED)
+            }
             if (::notificationDurationInput.isInitialized && !notificationDurationInput.hasFocus()) {
                 notificationDurationInput.setText(seconds.toString())
             }
@@ -1236,6 +1246,16 @@ class MainActivity : Activity() {
             })
         }
 
+    private fun notificationFontSizeControls(): LinearLayout =
+        buttonRow(
+            smallButton("-", ButtonTone.Secondary) {
+                adjustNotificationFontSize(-1.0f)
+            },
+            smallButton("+", ButtonTone.Secondary) {
+                adjustNotificationFontSize(1.0f)
+            },
+        )
+
     private fun saveNotificationDuration() {
         val raw = notificationDurationInput.text.toString().trim()
         val seconds = raw.toLongOrNull()
@@ -1252,6 +1272,22 @@ class MainActivity : Activity() {
         renderStatus()
         toastLine(if (clampedSeconds == 0L) "Popup stays visible" else "Popup duration saved: ${clampedSeconds}s")
     }
+
+    private fun adjustNotificationFontSize(deltaSp: Float) {
+        val store = NotificationSettingsStore(this)
+        val current = store.fontSizeSp()
+        val next = store.saveFontSizeSp(current + deltaSp)
+        RelayBridge.sendSettings()
+        renderStatus()
+        toastLine("Popup font size: ${formatFontSizeSp(next)}")
+    }
+
+    private fun formatFontSizeSp(value: Float): String =
+        if (kotlin.math.abs(value - value.toInt()) < 0.01f) {
+            "${value.toInt()}sp"
+        } else {
+            String.format(java.util.Locale.ROOT, "%.1fsp", value)
+        }
 
     private fun saveClearNotificationAfterReply(enabled: Boolean) {
         NotificationSettingsStore(this).saveClearPhoneNotificationAfterReply(enabled)
