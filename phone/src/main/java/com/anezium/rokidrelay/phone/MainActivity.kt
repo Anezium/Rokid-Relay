@@ -23,6 +23,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
+import android.view.inputmethod.EditorInfo
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
@@ -45,7 +46,9 @@ class MainActivity : Activity() {
     private lateinit var noticeText: TextView
     private lateinit var notificationDurationSummary: TextView
     private lateinit var notificationDurationInput: EditText
-    private lateinit var notificationFontSizeSummary: TextView
+    private lateinit var notificationFontSizeInput: EditText
+    private lateinit var notificationFontSizeDecreaseButton: Button
+    private lateinit var notificationFontSizeIncreaseButton: Button
     private lateinit var clearNotificationAfterReplyCheckBox: CheckBox
     private lateinit var notificationLimitsSummary: TextView
     private lateinit var inboxEntryLimitInput: EditText
@@ -91,6 +94,9 @@ class MainActivity : Activity() {
     private var selectedTab = AppTab.HOME
     private var modernBackCallback: OnBackInvokedCallback? = null
     private var updateState = AppUpdateUiState()
+    private var notificationFontSizeInputSaving = false
+    private var updateNotesExpanded = false
+    private var lastRenderedReleaseNotes = ""
 
     private val pollStatus = object : Runnable {
         override fun run() {
@@ -226,7 +232,7 @@ class MainActivity : Activity() {
     }
 
     private fun LinearLayout.addNotificationsPanel() {
-        addView(NotificationDisplayPanel(this@MainActivity, onNotice = { toastLine(it) }), matchWrap())
+        addView(NotificationDisplayPanel(this@MainActivity, onNotice = { toastLine(it) }), matchWrap(top = 16))
 
         addView(panel("Popup") {
             notificationDurationSummary = bodyText()
@@ -234,9 +240,7 @@ class MainActivity : Activity() {
             addView(label("Duration"), matchWrap(top = 14))
             addView(notificationDurationEditor(), matchWrap(top = 8))
             addView(label("Font size"), matchWrap(top = 14))
-            notificationFontSizeSummary = bodyText()
-            addView(notificationFontSizeSummary, matchWrap(top = 8))
-            addView(notificationFontSizeControls(), matchWrap(top = 8))
+            addView(notificationFontSizeEditor(), matchWrap(top = 8))
             clearNotificationAfterReplyCheckBox = CheckBox(this@MainActivity).apply {
                 text = "Clear phone notification after reply"
                 textSize = 12.5f
@@ -346,6 +350,12 @@ class MainActivity : Activity() {
             updateNotesText = bodyText().apply {
                 maxLines = 8
                 ellipsize = TextUtils.TruncateAt.END
+                setOnClickListener {
+                    if (releaseNotesHasOverflow(updateState.releaseNotes)) {
+                        updateNotesExpanded = !updateNotesExpanded
+                        renderUpdateStatus()
+                    }
+                }
             }
             addView(updateNotesText, matchWrap(top = 14))
 
@@ -902,9 +912,15 @@ class MainActivity : Activity() {
                 "Popup hides after ${seconds}s. The notification stays available in the inbox."
             }
             notificationDurationSummary.setTextColor(COLOR_MUTED)
-            if (::notificationFontSizeSummary.isInitialized) {
-                notificationFontSizeSummary.text = "Glasses popup text: ${formatFontSizeSp(store.fontSizeSp())}"
-                notificationFontSizeSummary.setTextColor(COLOR_MUTED)
+            if (::notificationFontSizeInput.isInitialized) {
+                val fontSize = store.fontSizeSp()
+                if (!notificationFontSizeInput.hasFocus()) {
+                    notificationFontSizeInput.setText(formatFontSizeValue(fontSize))
+                }
+                notificationFontSizeDecreaseButton.isEnabled =
+                    fontSize > NotificationSettingsStore.MIN_FONT_SIZE_SP
+                notificationFontSizeIncreaseButton.isEnabled =
+                    fontSize < NotificationSettingsStore.MAX_FONT_SIZE_SP
             }
             if (::notificationDurationInput.isInitialized && !notificationDurationInput.hasFocus()) {
                 notificationDurationInput.setText(seconds.toString())
@@ -984,9 +1000,19 @@ class MainActivity : Activity() {
                 else -> COLOR_TEXT
             },
         )
-        val notes = releaseNotesPreview(updateState.releaseNotes)
+        if (lastRenderedReleaseNotes != updateState.releaseNotes) {
+            lastRenderedReleaseNotes = updateState.releaseNotes
+            updateNotesExpanded = false
+        }
+        val notes = releaseNotesText(updateState.releaseNotes)
         updateNotesText.visibility = if (notes.isBlank()) View.GONE else View.VISIBLE
         updateNotesText.text = notes
+        val notesOverflow = releaseNotesHasOverflow(updateState.releaseNotes)
+        updateNotesText.maxLines = if (updateNotesExpanded) Int.MAX_VALUE else UPDATE_NOTES_COLLAPSED_LINES
+        updateNotesText.ellipsize = if (updateNotesExpanded) null else TextUtils.TruncateAt.END
+        updateNotesText.isClickable = notesOverflow
+        updateNotesText.isFocusable = notesOverflow
+        updateNotesText.setTextColor(if (notesOverflow && updateNotesExpanded) COLOR_TEXT else COLOR_MUTED)
 
         updateButton.text = when {
             updateState.checking -> "Checking"
@@ -1155,15 +1181,28 @@ class MainActivity : Activity() {
         )
     }
 
-    private fun releaseNotesPreview(notes: String): String {
-        val clean = notes
+    private fun releaseNotesText(notes: String): String {
+        val clean = cleanReleaseNotes(notes)
+        if (clean.isBlank() || updateNotesExpanded || !releaseNotesHasOverflow(notes)) return clean
+        return clean
+            .lineSequence()
+            .take(UPDATE_NOTES_PREVIEW_LINES)
+            .joinToString("\n")
+            .plus("\n\nShow full changelog")
+    }
+
+    private fun releaseNotesHasOverflow(notes: String): Boolean {
+        val clean = cleanReleaseNotes(notes)
+        if (clean.length > UPDATE_NOTES_COLLAPSED_CHARS) return true
+        return clean.lineSequence().count() > UPDATE_NOTES_COLLAPSED_LINES
+    }
+
+    private fun cleanReleaseNotes(notes: String): String =
+        notes
             .lineSequence()
             .map { line -> line.trim().trimStart('#', '-', '*').trim() }
             .filter { it.isNotBlank() }
-            .take(8)
             .joinToString("\n")
-        return if (clean.length <= 520) clean else clean.take(517) + "..."
-    }
 
     private fun updateSpeechChoiceButtons(selected: SpeechToTextEngine) {
         val mode = if (selected.provider == SpeechToTextProvider.ANDROID) SpeechMode.ANDROID else SpeechMode.API
@@ -1246,15 +1285,59 @@ class MainActivity : Activity() {
             })
         }
 
-    private fun notificationFontSizeControls(): LinearLayout =
-        buttonRow(
-            smallButton("-", ButtonTone.Secondary) {
+    private fun notificationFontSizeEditor(): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            notificationFontSizeInput = fontSizeInput()
+            addView(notificationFontSizeInput, LinearLayout.LayoutParams(0, dp(42), 1f))
+            notificationFontSizeDecreaseButton = fontSizeStepButton("-") {
                 adjustNotificationFontSize(-1.0f)
-            },
-            smallButton("+", ButtonTone.Secondary) {
+            }
+            addView(notificationFontSizeDecreaseButton, LinearLayout.LayoutParams(dp(46), dp(42)).apply {
+                leftMargin = dp(8)
+            })
+            notificationFontSizeIncreaseButton = fontSizeStepButton("+") {
                 adjustNotificationFontSize(1.0f)
-            },
-        )
+            }
+            addView(notificationFontSizeIncreaseButton, LinearLayout.LayoutParams(dp(46), dp(42)).apply {
+                leftMargin = dp(8)
+            })
+        }
+
+    private fun fontSizeStepButton(label: String, onClick: () -> Unit): Button =
+        smallButton(label, ButtonTone.Secondary, onClick).apply {
+            textSize = 21f
+            setPadding(0, 0, 0, dp(2))
+        }
+
+    private fun fontSizeInput(): EditText =
+        EditText(this).apply {
+            textSize = 15f
+            typeface = Typeface.DEFAULT_BOLD
+            includeFontPadding = false
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            imeOptions = EditorInfo.IME_ACTION_DONE
+            setSingleLine(true)
+            setSelectAllOnFocus(true)
+            gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            setTextColor(COLOR_TEXT)
+            setHintTextColor(COLOR_DIM)
+            setPadding(dp(8), 0, dp(8), 0)
+            minimumHeight = dp(42)
+            background = inputBackground()
+            setOnEditorActionListener { _, actionId, _ ->
+                if (actionId == EditorInfo.IME_ACTION_DONE) {
+                    saveNotificationFontSizeFromInput()
+                    true
+                } else {
+                    false
+                }
+            }
+            onFocusChangeListener = View.OnFocusChangeListener { _, hasFocus ->
+                if (!hasFocus) saveNotificationFontSizeFromInput()
+            }
+        }
 
     private fun saveNotificationDuration() {
         val raw = notificationDurationInput.text.toString().trim()
@@ -1282,12 +1365,41 @@ class MainActivity : Activity() {
         toastLine("Popup font size: ${formatFontSizeSp(next)}")
     }
 
-    private fun formatFontSizeSp(value: Float): String =
-        if (kotlin.math.abs(value - value.toInt()) < 0.01f) {
-            "${value.toInt()}sp"
-        } else {
-            String.format(java.util.Locale.ROOT, "%.1fsp", value)
+    private fun saveNotificationFontSizeFromInput() {
+        if (notificationFontSizeInputSaving) return
+        if (!::notificationFontSizeInput.isInitialized) return
+        notificationFontSizeInputSaving = true
+        try {
+            val raw = notificationFontSizeInput.text.toString().trim()
+            val requested = raw.toFloatOrNull()
+            if (requested == null) {
+                renderStatus()
+                toastLine(
+                    "Enter a font size from ${formatFontSizeSp(NotificationSettingsStore.MIN_FONT_SIZE_SP)} " +
+                        "to ${formatFontSizeSp(NotificationSettingsStore.MAX_FONT_SIZE_SP)}",
+                )
+                return
+            }
+            val next = NotificationSettingsStore(this).saveFontSizeSp(requested)
+            notificationFontSizeInput.setText(formatFontSizeValue(next))
+            notificationFontSizeInput.clearFocus()
+            RelayBridge.sendSettings()
+            renderStatus()
+            toastLine("Popup font size: ${formatFontSizeSp(next)}")
+        } finally {
+            notificationFontSizeInputSaving = false
         }
+    }
+
+    private fun formatFontSizeValue(value: Float): String =
+        if (kotlin.math.abs(value - value.toInt()) < 0.01f) {
+            value.toInt().toString()
+        } else {
+            String.format(java.util.Locale.ROOT, "%.1f", value)
+        }
+
+    private fun formatFontSizeSp(value: Float): String =
+        "${formatFontSizeValue(value)}sp"
 
     private fun saveClearNotificationAfterReply(enabled: Boolean) {
         NotificationSettingsStore(this).saveClearPhoneNotificationAfterReply(enabled)
@@ -1723,5 +1835,8 @@ class MainActivity : Activity() {
         val COLOR_DANGER_PRESSED: Int = Color.rgb(52, 23, 21)
         const val TAB_HEIGHT_DP = 52
         const val TAB_ICON_DP = 18
+        const val UPDATE_NOTES_PREVIEW_LINES = 8
+        const val UPDATE_NOTES_COLLAPSED_LINES = 10
+        const val UPDATE_NOTES_COLLAPSED_CHARS = 520
     }
 }
