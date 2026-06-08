@@ -36,7 +36,7 @@ class RelayService : Service() {
                 val reason = intent?.getStringExtra(Constants.EXTRA_START_REASON).orEmpty()
                 if (!token.isNullOrBlank()) {
                     if (reason.isNotBlank()) RelayBridge.setStatus("relay started: $reason")
-                    RelayBridge.start(applicationContext, token)
+                    RelayBridge.start(applicationContext, token, reason)
                 } else {
                     RelayBridge.setStatus("missing auth token")
                 }

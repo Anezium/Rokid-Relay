@@ -14,24 +14,44 @@ class ClientBootstrap(
     private val context: Context,
     private val link: CXRLink,
 ) {
-    fun ensureRunning(): String {
+    data class Result(
+        val status: String,
+        val success: Boolean,
+        val openedClient: Boolean,
+    )
+
+    fun ensureReady(openClient: Boolean): Result {
         val installed = queryInstalled()
         val apk = extractAssetApk()
         val assetInfo = apk?.clientAssetInfo()
         val shouldInstall = !installed || bundledClientChanged(assetInfo)
         val installedFromBundle = if (shouldInstall) {
-            if (apk == null) return "glasses asset missing"
+            if (apk == null) return Result("glasses asset missing", success = false, openedClient = false)
             Log.i(TAG, "installing bundled glasses app ${assetInfo?.label.orEmpty().ifBlank { apk.name }}")
-            if (!installApk(apk)) return "glasses install failed"
+            if (!installApk(apk)) return Result("glasses install failed", success = false, openedClient = false)
             assetInfo?.let(::rememberInstalledClient)
             true
         } else {
             false
         }
+        if (!openClient) {
+            val status = if (installedFromBundle) {
+                "glasses app installed/updated in background"
+            } else {
+                "glasses app ready in background"
+            }
+            return Result(status, success = true, openedClient = false)
+        }
+        return openClient(
+            successStatus = if (installedFromBundle) "glasses app installed/updated" else "glasses app running",
+        )
+    }
+
+    fun openClient(successStatus: String = "glasses app running"): Result {
         return if (startClient()) {
-            if (installedFromBundle) "glasses app installed/updated" else "glasses app running"
+            Result(successStatus, success = true, openedClient = true)
         } else {
-            "glasses start failed"
+            Result("glasses start failed", success = false, openedClient = false)
         }
     }
 
