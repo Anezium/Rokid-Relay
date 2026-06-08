@@ -68,7 +68,9 @@ class AndroidCxrSpeechRecognizer(
         }
         RelayService.refreshForeground()
         if (!RelayService.microphoneForegroundActive) {
-            failBeforeStart("Microphone foreground unavailable")
+            val detail = RelayService.lastMicrophoneForegroundError
+            Log.w(TAG, "Microphone foreground unavailable: ${detail.ifBlank { "unknown" }}")
+            failBeforeStart("Open phone app for Android CXR mic")
             return false
         }
         val readFd = startCxrAudioSource() ?: run {

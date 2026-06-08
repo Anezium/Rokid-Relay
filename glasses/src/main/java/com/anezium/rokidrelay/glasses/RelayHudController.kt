@@ -10,6 +10,7 @@ object RelayHudController {
     data class State(
         val connection: String = "connecting",
         val notification: RelayHudView.NotificationModel? = null,
+        val notificationPage: Int = 0,
         val inbox: List<RelayHudView.NotificationModel> = emptyList(),
         val inboxVisible: Boolean = false,
         val inboxDetail: Boolean = false,
@@ -43,6 +44,7 @@ object RelayHudController {
                 val closeEmptyInbox = inboxVisible && inbox.isEmpty()
                 copy(
                     notification = null,
+                    notificationPage = 0,
                     resultLine = "",
                     replyOk = false,
                     voicePartial = "",
@@ -106,6 +108,7 @@ object RelayHudController {
             val shouldNotify = state.notification != model
             state = state.copy(
                 notification = model,
+                notificationPage = 0,
                 inboxVisible = false,
                 inboxDetail = false,
                 inboxIndex = 0,
@@ -140,13 +143,20 @@ object RelayHudController {
         update {
             val cleanValue = NotificationOverlaySettings.sanitizeFontSizeSp(value)
             val selectedText = inbox.getOrNull(inboxIndex)?.text.orEmpty()
+            val notificationText = notification?.text.orEmpty()
             val nextDetailPage = if (inboxDetail && selectedText.isNotBlank()) {
                 inboxDetailPage.coerceIn(0, NotificationTextPager.pageCount(selectedText, cleanValue) - 1)
             } else {
                 inboxDetailPage
             }
+            val nextNotificationPage = if (notificationText.isNotBlank()) {
+                notificationPage.coerceIn(0, NotificationTextPager.pageCount(notificationText, cleanValue) - 1)
+            } else {
+                0
+            }
             copy(
                 notificationFontSizeSp = cleanValue,
+                notificationPage = nextNotificationPage,
                 inboxDetailPage = nextDetailPage,
             )
         }
@@ -192,10 +202,17 @@ object RelayHudController {
             } else {
                 null
             }
+            val notificationText = nextNotification?.text.orEmpty()
+            val nextNotificationPage = if (notificationText.isNotBlank()) {
+                notificationPage.coerceIn(0, NotificationTextPager.pageCount(notificationText, notificationFontSizeSp) - 1)
+            } else {
+                0
+            }
             val nextDetail = inboxDetail && items.isNotEmpty() && sameSelectedItem
             val selectedText = items.getOrNull(nextIndex)?.text.orEmpty()
             copy(
                 notification = nextNotification,
+                notificationPage = nextNotificationPage,
                 inbox = items,
                 inboxIndex = nextIndex,
                 inboxDetail = nextDetail,
@@ -308,6 +325,27 @@ object RelayHudController {
         return true
     }
 
+    fun pageNotification(delta: Int): Boolean {
+        val snapshot = state
+        if (snapshot.inboxVisible || snapshot.isVoiceBusy()) return false
+        val model = snapshot.notification ?: return false
+        val pageCount = NotificationTextPager.pageCount(model.text, snapshot.notificationFontSizeSp)
+        if (pageCount <= 1) return false
+        val nextPage = (snapshot.notificationPage + delta).coerceIn(0, pageCount - 1)
+        if (nextPage == snapshot.notificationPage) return true
+        update {
+            copy(
+                notificationPage = nextPage,
+                transientLine = "",
+                resultLine = "",
+                replyOk = false,
+                voiceState = "idle",
+                voicePartial = "",
+            )
+        }
+        return true
+    }
+
     fun backInInbox() {
         update {
             if (inboxDetail) {
@@ -330,6 +368,7 @@ object RelayHudController {
         update {
             copy(
                 notification = null,
+                notificationPage = 0,
                 voiceState = "idle",
                 voicePartial = "",
                 resultLine = "",
@@ -379,6 +418,13 @@ object RelayHudController {
     }
 
     fun hasNotification(): Boolean = state.notification != null
+
+    fun hasPagedNotification(): Boolean {
+        val snapshot = state
+        val model = snapshot.notification ?: return false
+        if (snapshot.inboxVisible || snapshot.isVoiceBusy()) return false
+        return NotificationTextPager.pageCount(model.text, snapshot.notificationFontSizeSp) > 1
+    }
 
     fun isInboxOpen(): Boolean = state.inboxVisible
 
@@ -505,6 +551,12 @@ object RelayHudController {
 
     private fun sanitizePopupDuration(durationMs: Long): Long =
         durationMs.coerceIn(0L, MAX_NOTIFICATION_POPUP_DURATION_MS)
+
+    private fun State.isVoiceBusy(): Boolean =
+        voiceState == "listening" ||
+            voiceState == "recognizing" ||
+            voiceState == "processing" ||
+            voiceState == "reviewing"
 
     private const val SENT_RESULT_HOLD_MS = 1_250L
     private const val EMPTY_INBOX_HOLD_MS = 1_500L

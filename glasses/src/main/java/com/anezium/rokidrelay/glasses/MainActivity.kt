@@ -60,7 +60,7 @@ class MainActivity : Activity() {
                     RelayHudController.isVoiceActive() -> RelayBridge.cancelVoice()
                     RelayHudController.isInboxDetailOpen() -> RelayBridge.startVoice()
                     RelayHudController.isInboxOpen() -> RelayHudController.openInboxDetail()
-                    RelayHudController.hasNotification() -> RelayBridge.hideNotification()
+                    RelayHudController.hasNotification() -> RelayBridge.startVoice()
                     else -> openAccessibilitySettings()
                 }
                 true
@@ -92,7 +92,7 @@ class MainActivity : Activity() {
             return true
         }
         if (RelayHudController.hasNotification()) {
-            RelayBridge.startVoice()
+            if (!pageNotification(direction)) RelayBridge.startVoice()
             return true
         }
         return if (addToCombo(direction)) {
@@ -109,6 +109,14 @@ class MainActivity : Activity() {
         if (now - lastInboxPageAtMs < INBOX_PAGE_DEBOUNCE_MS) return
         lastInboxPageAtMs = now
         RelayHudController.pageInboxDetail(if (direction == RelayDirection.LEFT) -1 else 1)
+    }
+
+    private fun pageNotification(direction: RelayDirection): Boolean {
+        if (!RelayHudController.hasPagedNotification()) return false
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastInboxPageAtMs < INBOX_PAGE_DEBOUNCE_MS) return true
+        lastInboxPageAtMs = now
+        return RelayHudController.pageNotification(if (direction == RelayDirection.LEFT) -1 else 1)
     }
 
     private fun addToCombo(direction: RelayDirection): Boolean {

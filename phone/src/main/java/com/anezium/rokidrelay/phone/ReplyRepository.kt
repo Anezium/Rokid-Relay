@@ -10,6 +10,7 @@ import android.os.Parcelable
 import android.service.notification.StatusBarNotification
 import android.util.Log
 import java.security.MessageDigest
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
@@ -148,20 +149,38 @@ object ReplyRepository {
             NotificationSettingsStore.MAX_THREAD_MESSAGE_LIMIT,
         )
         val messages = messagingStyleText(extras, maxMessages)
-        if (messages.isNotBlank()) return messages
+        val lines = expandedTextLines(extras, maxMessages)
+        if (messages.isNotBlank()) {
+            return if (shouldPreferExpandedLines(messages, lines)) lines else messages
+        }
+
+        if (lines.isNotBlank()) return lines
 
         val big = extras.charSequence(Notification.EXTRA_BIG_TEXT)
         if (!big.isNullOrBlank()) return big.toString()
 
-        val lines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
-        if (!lines.isNullOrEmpty()) {
-            return lines
-                .takeLast(maxMessages)
-                .joinToString("\n") { it.toString() }
-        }
-
         val text = extras.charSequence(Notification.EXTRA_TEXT)
         return text?.toString().orEmpty()
+    }
+
+    private fun expandedTextLines(extras: Bundle, messageLimit: Int): String {
+        val lines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
+        if (lines.isNullOrEmpty()) return ""
+        return lines
+            .map { it.toString().trim() }
+            .filter { it.isNotBlank() }
+            .takeLast(messageLimit)
+            .joinToString("\n")
+    }
+
+    private fun shouldPreferExpandedLines(primary: String, lines: String): Boolean {
+        if (lines.isBlank()) return false
+        val cleanPrimary = primary.normalizedForComparison()
+        val cleanLines = lines.normalizedForComparison()
+        if (cleanLines.isBlank() || cleanLines == cleanPrimary) return false
+        if (primary.looksLikeCollapsedMessageSummary()) return true
+        return lines.count { it == '\n' } >= primary.count { it == '\n' } &&
+            cleanLines.length > cleanPrimary.length + EXPANDED_LINES_DETAIL_MARGIN
     }
 
     private fun messagingStyleText(extras: Bundle, messageLimit: Int): String {
@@ -247,6 +266,26 @@ object ReplyRepository {
         val digest = MessageDigest.getInstance("SHA-256").digest(key.toByteArray())
         return digest.take(10).joinToString("") { "%02x".format(it) }
     }
+
+    private fun String.normalizedForComparison(): String =
+        trim()
+            .replace(Regex("\\s+"), " ")
+            .lowercase(Locale.ROOT)
+
+    private fun String.looksLikeCollapsedMessageSummary(): Boolean {
+        val normalized = normalizedForComparison()
+        val tail = normalized.substringAfterLast(": ").trim()
+        return COLLAPSED_MESSAGE_SUMMARY_PATTERNS.any { pattern ->
+            pattern.matches(normalized) || pattern.matches(tail)
+        }
+    }
+
+    private const val EXPANDED_LINES_DETAIL_MARGIN = 24
+    private val COLLAPSED_MESSAGE_SUMMARY_PATTERNS = listOf(
+        Regex("""\d+\s+new\s+messages?"""),
+        Regex("""\d+\s+messages?\s+from\s+\d+\s+(chats?|contacts?|conversations?)"""),
+        Regex("""\d+\s+(chats?|contacts?|conversations?)\s+from\s+\d+\s+messages?"""),
+    )
     private const val TAG = "RelayReplyRepo"
 }
 

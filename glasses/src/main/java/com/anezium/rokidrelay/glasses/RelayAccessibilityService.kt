@@ -149,7 +149,7 @@ class RelayAccessibilityService : AccessibilityService() {
             }
             if (RelayHudController.hasNotification()) {
                 keepReplyScreenOn()
-                RelayBridge.startVoice()
+                if (!pageNotification(direction)) RelayBridge.startVoice()
                 return true
             }
             return handleDirectionalComboFallback(direction)
@@ -158,7 +158,8 @@ class RelayAccessibilityService : AccessibilityService() {
         return when (event.keyCode) {
             in CONFIRM_KEYS -> {
                 if (RelayHudController.hasNotification()) {
-                    RelayBridge.hideNotification()
+                    keepReplyScreenOn()
+                    RelayBridge.startVoice()
                     true
                 } else {
                     false
@@ -279,7 +280,7 @@ class RelayAccessibilityService : AccessibilityService() {
         }
         if (RelayHudController.hasNotification()) {
             keepReplyScreenOn()
-            RelayBridge.startVoice()
+            if (!pageNotification(direction)) RelayBridge.startVoice()
             restoreCommandVolumeSoon()
             return
         }
@@ -304,6 +305,14 @@ class RelayAccessibilityService : AccessibilityService() {
         if (now - lastInboxPageAtMs < INBOX_PAGE_DEBOUNCE_MS) return
         lastInboxPageAtMs = now
         RelayHudController.pageInboxDetail(if (direction == RelayDirection.LEFT) -1 else 1)
+    }
+
+    private fun pageNotification(direction: RelayDirection): Boolean {
+        if (!RelayHudController.hasPagedNotification()) return false
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastInboxPageAtMs < INBOX_PAGE_DEBOUNCE_MS) return true
+        lastInboxPageAtMs = now
+        return RelayHudController.pageNotification(if (direction == RelayDirection.LEFT) -1 else 1)
     }
 
     private fun notificationWakeDuration(popupDurationMs: Long): Long =

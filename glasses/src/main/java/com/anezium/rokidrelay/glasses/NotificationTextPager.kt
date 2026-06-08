@@ -62,7 +62,7 @@ object NotificationTextPager {
             .coerceIn(MIN_CHARS_PER_VISUAL_LINE, MAX_CHARS_PER_VISUAL_LINE)
     }
 
-    private const val MAX_VISUAL_LINES_PER_PAGE = 4
+    private const val MAX_VISUAL_LINES_PER_PAGE = 6
     private const val BASE_FONT_SIZE_SP = NotificationOverlaySettings.DEFAULT_FONT_SIZE_SP
     private const val BASE_CHARS_PER_VISUAL_LINE = 46f
     private const val MIN_CHARS_PER_VISUAL_LINE = 28

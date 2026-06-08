@@ -60,7 +60,7 @@ Rokid Relay forwards replyable Android notifications from the phone to the glass
 - The phone app listens for notifications that expose an Android `RemoteInput` reply action.
 - The phone app connects to Global Hi Rokid through CXR-L and starts or installs the glasses helper when possible.
 - The glasses app receives notification events through CXR-S and renders a compact green overlay above other glasses apps.
-- Direction input on the glasses starts a voice reply.
+- Direction input pages long notification text, and starts a voice reply for single-page popups.
 - Speech-to-text runs from the glasses microphone stream, then the phone sends the final text through the original notification reply action.
 - A small inbox lets you revisit recent replyable notifications and switch between them from the glasses.
 
@@ -220,8 +220,8 @@ When a replyable notification popup is visible:
 
 | Control | Action |
 | --- | --- |
-| Swipe/DPAD left or right | Start voice reply |
-| Tap/OK/center | Dismiss the current popup |
+| Swipe/DPAD left or right | Page long text; starts voice reply when there is only one page |
+| Tap/OK/center | Start voice reply |
 | Back | Dismiss the current popup |
 
 During voice capture:

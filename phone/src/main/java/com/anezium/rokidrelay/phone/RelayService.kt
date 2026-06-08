@@ -48,6 +48,8 @@ class RelayService : Service() {
     override fun onDestroy() {
         RelayBridge.stop()
         running = false
+        microphoneForegroundActive = false
+        lastMicrophoneForegroundError = "Relay service stopped"
         if (instance === this) instance = null
         super.onDestroy()
     }
@@ -57,6 +59,7 @@ class RelayService : Service() {
     private fun startForegroundCompat() {
         val notification = buildNotification()
         val requestMicrophone = shouldRequestMicrophoneForeground()
+        lastMicrophoneForegroundError = ""
         runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val microphoneType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && requestMicrophone) {
@@ -70,13 +73,18 @@ class RelayService : Service() {
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or microphoneType,
                 )
                 microphoneForegroundActive = microphoneType != 0
+                if (requestMicrophone && !microphoneForegroundActive) {
+                    lastMicrophoneForegroundError = "Microphone foreground type unavailable on this Android version"
+                }
             } else {
                 startForeground(NOTIFICATION_ID, notification)
                 microphoneForegroundActive = requestMicrophone
             }
         }.onFailure {
             microphoneForegroundActive = false
-            Log.w(TAG, "foreground start failed: ${it.message}")
+            lastMicrophoneForegroundError = it.message?.takeIf { message -> message.isNotBlank() }
+                ?: it::class.java.simpleName
+            Log.w(TAG, "foreground start failed: $lastMicrophoneForegroundError")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && requestMicrophone) {
                 runCatching {
                     startForeground(
@@ -136,14 +144,24 @@ class RelayService : Service() {
         @Volatile var microphoneForegroundActive: Boolean = false
             private set
 
+        @Volatile var lastMicrophoneForegroundError: String = ""
+            private set
+
         @Volatile private var instance: RelayService? = null
 
         private const val TAG = "RelayService"
         private const val CHANNEL_ID = "rokid_relay"
         private const val NOTIFICATION_ID = 7201
 
-        fun refreshForeground() {
-            instance?.startForegroundCompat()
+        fun refreshForeground(): Boolean {
+            val service = instance
+            if (service == null) {
+                microphoneForegroundActive = false
+                lastMicrophoneForegroundError = "Relay service not running"
+                return false
+            }
+            service.startForegroundCompat()
+            return microphoneForegroundActive
         }
     }
 }

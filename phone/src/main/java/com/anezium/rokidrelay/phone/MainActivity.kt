@@ -118,7 +118,14 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        if (!runtimePermissionRequestInFlight) autoStartOrAuthorize("app_open")
+        if (!runtimePermissionRequestInFlight) {
+            autoStartOrAuthorize("app_open")
+            RelayService.refreshForeground()
+            handler.postDelayed({
+                RelayService.refreshForeground()
+                renderStatus()
+            }, FOREGROUND_REFRESH_DELAY_MS)
+        }
         renderStatus()
         handler.post(pollStatus)
     }
@@ -1815,6 +1822,7 @@ class MainActivity : Activity() {
     }
 
     private companion object {
+        private const val FOREGROUND_REFRESH_DELAY_MS = 250L
         val COLOR_APP_BG: Int = Color.rgb(4, 10, 6)
         val COLOR_PANEL: Int = Color.rgb(8, 18, 11)
         val COLOR_PANEL_ALT: Int = Color.rgb(11, 29, 16)

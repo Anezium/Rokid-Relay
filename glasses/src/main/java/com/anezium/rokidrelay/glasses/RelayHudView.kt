@@ -55,6 +55,7 @@ class RelayHudView(
 
     private var connection = "connecting"
     private var notification: NotificationModel? = null
+    private var notificationPage = 0
     private var inbox: List<NotificationModel> = emptyList()
     private var inboxVisible = false
     private var inboxDetail = false
@@ -87,6 +88,7 @@ class RelayHudView(
     fun applyState(state: RelayHudController.State) {
         connection = state.connection
         notification = state.notification
+        notificationPage = state.notificationPage
         inbox = state.inbox
         inboxVisible = state.inboxVisible
         inboxDetail = state.inboxDetail
@@ -203,8 +205,8 @@ class RelayHudView(
 
         titleLabel.maxLines = 1
         titleLabel.ellipsize = TextUtils.TruncateAt.END
-        messageLabel.maxLines = 4
-        messageLabel.maxHeight = dp(96)
+        messageLabel.maxLines = 6
+        messageLabel.maxHeight = dp(154)
         messageLabel.ellipsize = TextUtils.TruncateAt.END
         hintLabel.maxLines = 1
         hintLabel.ellipsize = TextUtils.TruncateAt.END
@@ -274,8 +276,11 @@ class RelayHudView(
         titleLabel.setTextColor(TEXT)
         appLabel.text = model.app.ifBlank { "Message" }
         titleLabel.text = model.title.ifBlank { "Replyable notification" }
-        val hasVoiceTranscript = renderMessageBody(NotificationTextPager.page(model.text, 0, notificationFontSizeSp))
+        val pages = NotificationTextPager.pages(model.text, notificationFontSizeSp)
+        val pageIndex = notificationPage.coerceIn(0, pages.lastIndex)
+        val hasVoiceTranscript = renderMessageBody(pages[pageIndex])
         renderStatus(hasVoiceTranscript)
+        renderPageHint(pageIndex, pages.size)
     }
 
     private fun renderSentState() {
@@ -392,8 +397,10 @@ class RelayHudView(
     private fun popupMessageLines(text: String): Int {
         val lineBreaks = text.count { it == '\n' }
         return when {
-            text.length > 180 || lineBreaks >= 3 -> 4
-            text.length > 90 || lineBreaks >= 1 -> 3
+            text.length > 300 || lineBreaks >= 5 -> 6
+            text.length > 220 || lineBreaks >= 4 -> 5
+            text.length > 130 || lineBreaks >= 2 -> 4
+            text.length > 70 || lineBreaks >= 1 -> 3
             else -> 2
         }
     }
@@ -504,7 +511,7 @@ class RelayHudView(
     }
 
     private fun popupTextMaxHeight(lineCount: Int, textSizeSp: Float): Int =
-        dp((Math.round(textSizeSp * 1.32f * lineCount) + 4).coerceIn(40, 150))
+        dp((Math.round(textSizeSp * 1.32f * lineCount) + 4).coerceIn(40, 220))
 
     private fun applyPopupFontSize() {
         if (!overlayMode) return
