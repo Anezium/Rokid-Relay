@@ -43,6 +43,16 @@ class NotificationSettingsStore(context: Context) {
         prefs.edit().putBoolean(Constants.PREF_CLEAR_PHONE_NOTIFICATION_AFTER_REPLY, enabled).apply()
     }
 
+    fun pauseForwardingWhenPhoneScreenOn(): Boolean =
+        prefs.getBoolean(
+            Constants.PREF_PAUSE_NOTIFICATION_FORWARDING_WHEN_SCREEN_ON,
+            DEFAULT_PAUSE_FORWARDING_WHEN_PHONE_SCREEN_ON,
+        )
+
+    fun savePauseForwardingWhenPhoneScreenOn(enabled: Boolean) {
+        prefs.edit().putBoolean(Constants.PREF_PAUSE_NOTIFICATION_FORWARDING_WHEN_SCREEN_ON, enabled).apply()
+    }
+
     fun inboxEntryLimit(): Int =
         sanitizeInboxEntryLimit(prefs.getInt(Constants.PREF_INBOX_ENTRY_LIMIT, DEFAULT_INBOX_ENTRY_LIMIT))
 
@@ -73,6 +83,7 @@ class NotificationSettingsStore(context: Context) {
         const val MIN_FONT_SIZE_SP = 11.0f
         const val MAX_FONT_SIZE_SP = 24.0f
         const val DEFAULT_CLEAR_PHONE_NOTIFICATION_AFTER_REPLY = true
+        const val DEFAULT_PAUSE_FORWARDING_WHEN_PHONE_SCREEN_ON = false
         const val DEFAULT_INBOX_ENTRY_LIMIT = 16
         const val MIN_INBOX_ENTRY_LIMIT = 4
         const val MAX_INBOX_ENTRY_LIMIT = 32

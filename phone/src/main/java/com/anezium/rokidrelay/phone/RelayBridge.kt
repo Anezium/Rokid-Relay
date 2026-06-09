@@ -147,6 +147,13 @@ object RelayBridge {
     )
 
     fun sendNotification(reply: ReplyRepository.PendingReply) {
+        if (notificationForwardingPaused()) {
+            if (pendingNotificationRetry?.id == reply.id) pendingNotificationRetry = null
+            lastStatus = "notification forwarding paused: phone screen on"
+            Log.i(TAG, "notification forwarding paused id=${reply.id.take(8)}")
+            sendInbox()
+            return
+        }
         val json = JSONObject()
             .put("version", Constants.PROTOCOL_VERSION)
             .put("type", "notification")
@@ -191,9 +198,14 @@ object RelayBridge {
 
     fun sendInbox() {
         val settings = appContext?.let { NotificationSettingsStore(it) }
-        val items = ReplyRepository.listPending(
-            settings?.inboxEntryLimit() ?: NotificationSettingsStore.DEFAULT_INBOX_ENTRY_LIMIT,
-        )
+        val forwardingPaused = notificationForwardingPaused()
+        val items = if (forwardingPaused) {
+            emptyList()
+        } else {
+            ReplyRepository.listPending(
+                settings?.inboxEntryLimit() ?: NotificationSettingsStore.DEFAULT_INBOX_ENTRY_LIMIT,
+            )
+        }
         val notifications = JSONArray()
         items.forEach { reply ->
             notifications.put(
@@ -437,6 +449,9 @@ object RelayBridge {
         Log.i(TAG, "retrying pending notification id=${pending.id.take(8)}")
         sendNotification(pending)
     }
+
+    private fun notificationForwardingPaused(): Boolean =
+        appContext?.let { NotificationForwardingPolicy.isPaused(it) } == true
 
     private fun handleCommand(json: JSONObject) {
         val type = json.optString("type")

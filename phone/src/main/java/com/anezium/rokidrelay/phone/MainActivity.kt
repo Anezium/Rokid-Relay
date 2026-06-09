@@ -44,6 +44,8 @@ class MainActivity : Activity() {
     private lateinit var updateManager: GitHubUpdateManager
     private lateinit var setupRows: LinearLayout
     private lateinit var noticeText: TextView
+    private lateinit var notificationForwardingSummary: TextView
+    private lateinit var pauseForwardingWhenScreenOnCheckBox: CheckBox
     private lateinit var notificationDurationSummary: TextView
     private lateinit var notificationDurationInput: EditText
     private lateinit var notificationFontSizeInput: EditText
@@ -242,21 +244,20 @@ class MainActivity : Activity() {
         addView(NotificationDisplayPanel(this@MainActivity, onNotice = { toastLine(it) }), matchWrap(top = 16))
 
         addView(panel("Popup") {
+            notificationForwardingSummary = bodyText()
+            addView(notificationForwardingSummary, matchWrap())
+            pauseForwardingWhenScreenOnCheckBox = settingsCheckBox("Pause while phone screen is on") {
+                savePauseForwardingWhenScreenOn(it)
+            }
+            addView(pauseForwardingWhenScreenOnCheckBox, matchWrap(top = 12))
+            addView(label("Popup duration"), matchWrap(top = 14))
             notificationDurationSummary = bodyText()
-            addView(notificationDurationSummary, matchWrap())
-            addView(label("Duration"), matchWrap(top = 14))
+            addView(notificationDurationSummary, matchWrap(top = 8))
             addView(notificationDurationEditor(), matchWrap(top = 8))
             addView(label("Font size"), matchWrap(top = 14))
             addView(notificationFontSizeEditor(), matchWrap(top = 8))
-            clearNotificationAfterReplyCheckBox = CheckBox(this@MainActivity).apply {
-                text = "Clear phone notification after reply"
-                textSize = 12.5f
-                includeFontPadding = false
-                setTextColor(COLOR_TEXT)
-                buttonTintList = ColorStateList.valueOf(COLOR_PHOSPHOR)
-                setOnClickListener {
-                    saveClearNotificationAfterReply(isChecked)
-                }
+            clearNotificationAfterReplyCheckBox = settingsCheckBox("Clear phone notification after reply") {
+                saveClearNotificationAfterReply(it)
             }
             addView(clearNotificationAfterReplyCheckBox, matchWrap(top = 12))
             notificationLimitsSummary = bodyText()
@@ -748,6 +749,18 @@ class MainActivity : Activity() {
     private fun textButton(label: String, onClick: () -> Unit): Button =
         smallButton(label, ButtonTone.Secondary, onClick)
 
+    private fun settingsCheckBox(label: String, onChanged: (Boolean) -> Unit): CheckBox =
+        CheckBox(this).apply {
+            text = label
+            textSize = 12.5f
+            includeFontPadding = false
+            minHeight = dp(38)
+            gravity = Gravity.CENTER_VERTICAL
+            setTextColor(COLOR_TEXT)
+            buttonTintList = ColorStateList.valueOf(COLOR_PHOSPHOR)
+            setOnClickListener { onChanged(isChecked) }
+        }
+
     private fun label(text: String): TextView =
         TextView(this).apply {
             this.text = text
@@ -886,6 +899,8 @@ class MainActivity : Activity() {
                 !notifications -> "Notification access is still required."
                 !sttReady -> "Finish speech-to-text setup for voice replies."
                 !batteryUnrestricted -> "Ready. Set battery to Unrestricted for best reliability."
+                RelayService.running && NotificationForwardingPolicy.isPaused(this) ->
+                    "Ready. Forwarding is paused while this screen is on."
                 RelayService.running -> "Ready. Replyable notifications will forward to the glasses."
                 else -> "Ready to start."
             }
@@ -908,6 +923,23 @@ class MainActivity : Activity() {
                     "${selectedEngine.displayName}. Uses buffered glasses audio."
             }
             sttSummary.setTextColor(if (sttReady) COLOR_TEXT else COLOR_MUTED)
+        }
+
+        if (::notificationForwardingSummary.isInitialized) {
+            val store = NotificationSettingsStore(this)
+            val pauseWhenScreenOn = store.pauseForwardingWhenPhoneScreenOn()
+            val pausedNow = NotificationForwardingPolicy.isPaused(this)
+            notificationForwardingSummary.text = when {
+                pausedNow -> "Forwarding is paused because the phone screen is on."
+                pauseWhenScreenOn -> "Forwarding resumes automatically when the phone screen turns off."
+                else -> "Replyable notifications forward to the glasses as they arrive."
+            }
+            notificationForwardingSummary.setTextColor(if (pausedNow) COLOR_AMBER else COLOR_MUTED)
+            if (::pauseForwardingWhenScreenOnCheckBox.isInitialized &&
+                pauseForwardingWhenScreenOnCheckBox.isChecked != pauseWhenScreenOn
+            ) {
+                pauseForwardingWhenScreenOnCheckBox.isChecked = pauseWhenScreenOn
+            }
         }
 
         if (::notificationDurationSummary.isInitialized) {
@@ -1416,6 +1448,23 @@ class MainActivity : Activity() {
                 "Phone notifications will be cleared after replies"
             } else {
                 "Phone notifications stay after replies"
+            },
+        )
+    }
+
+    private fun savePauseForwardingWhenScreenOn(enabled: Boolean) {
+        NotificationSettingsStore(this).savePauseForwardingWhenPhoneScreenOn(enabled)
+        if (enabled) {
+            RelayBridge.sendInbox()
+        } else {
+            NotificationControl.refreshActiveNotifications()
+        }
+        renderStatus()
+        toastLine(
+            if (enabled) {
+                "Forwarding pauses while the phone screen is on"
+            } else {
+                "Forwarding stays active while the phone screen is on"
             },
         )
     }

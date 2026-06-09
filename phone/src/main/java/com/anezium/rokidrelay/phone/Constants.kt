@@ -33,6 +33,7 @@ object Constants {
     const val PREF_NOTIFICATION_POPUP_DURATION_MS = "notification_popup_duration_ms"
     const val PREF_NOTIFICATION_FONT_SIZE_SP = "notification_font_size_sp"
     const val PREF_CLEAR_PHONE_NOTIFICATION_AFTER_REPLY = "clear_phone_notification_after_reply"
+    const val PREF_PAUSE_NOTIFICATION_FORWARDING_WHEN_SCREEN_ON = "pause_notification_forwarding_when_screen_on"
     const val PREF_INBOX_ENTRY_LIMIT = "inbox_entry_limit"
     const val PREF_THREAD_MESSAGE_LIMIT = "thread_message_limit"
     const val PREF_INPUT_COMBO = "input_combo"

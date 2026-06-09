@@ -15,6 +15,12 @@ class RelayNotificationListener : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         sbn ?: return
+        if (NotificationForwardingPolicy.isPaused(this)) {
+            Log.i(TAG, "posted pkg=${sbn.packageName} skipped=phone_screen_on")
+            RelayBridge.setStatus("notification forwarding paused: phone screen on")
+            RelayBridge.sendInbox()
+            return
+        }
         val capture = ReplyRepository.capture(this, sbn) ?: return
         Log.i(
             TAG,
@@ -48,6 +54,11 @@ class RelayNotificationListener : NotificationListenerService() {
     }
 
     private fun syncActiveNotifications() {
+        if (NotificationForwardingPolicy.isPaused(this)) {
+            Log.i(TAG, "active notification sync skipped: phone screen on")
+            RelayBridge.sendInbox()
+            return
+        }
         val count = runCatching {
             activeNotifications.orEmpty().count { sbn ->
                 ReplyRepository.capture(this, sbn) != null

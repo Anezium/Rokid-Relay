@@ -27,6 +27,11 @@ object NotificationControl {
                 Log.w(TAG, "Cannot refresh active notifications: listener unavailable")
                 return@post
             }
+            if (NotificationForwardingPolicy.isPaused(service)) {
+                Log.i(TAG, "active notification refresh skipped: phone screen on")
+                RelayBridge.sendInbox()
+                return@post
+            }
             val count = runCatching {
                 service.activeNotifications.orEmpty().count { sbn ->
                     ReplyRepository.capture(service, sbn) != null
