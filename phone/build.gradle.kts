@@ -10,8 +10,8 @@ android {
         applicationId = "com.anezium.rokidrelay.phone"
         minSdk = 31
         targetSdk = 36
-        versionCode = 10
-        versionName = "0.1.9"
+        versionCode = 11
+        versionName = "0.1.10"
     }
 
     buildTypes {
@@ -32,7 +32,7 @@ android {
 
 dependencies {
     implementation("com.example.cxrglobal:lib:0.1.0-SNAPSHOT")
-    implementation("com.rokid.cxr:client-l:1.0.1")
+    implementation("com.rokid.cxr:client-l:1.0.3")
     implementation("androidx.core:core:1.18.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }
