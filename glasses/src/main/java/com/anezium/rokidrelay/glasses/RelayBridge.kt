@@ -99,6 +99,8 @@ object RelayBridge {
             if (connected) main.post { RelayHudController.setConnection("connected") }
         }
 
+        override fun onAudioNoise(noise: Float) = Unit
+
         override fun onRokidAccountChanged(account: String?) = Unit
     }
 

@@ -10,8 +10,8 @@ android {
         applicationId = "com.anezium.rokidrelay.glasses"
         minSdk = 31
         targetSdk = 32
-        versionCode = 7
-        versionName = "0.1.6"
+        versionCode = 8
+        versionName = "0.1.7"
     }
 
     buildTypes {
@@ -31,5 +31,5 @@ android {
 }
 
 dependencies {
-    implementation("com.rokid.cxr:cxr-service-bridge:1.0-20260212.103714-88")
+    implementation("com.rokid.cxr:cxr-service-bridge:1.0-20260522.063600-105")
 }
