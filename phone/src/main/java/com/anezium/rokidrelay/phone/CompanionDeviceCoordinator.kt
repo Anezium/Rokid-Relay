@@ -38,6 +38,9 @@ object CompanionDeviceCoordinator {
     // alias Android shows in Settings, so the filter must accept both spellings.
     private val GLASSES_NAME_PATTERN = Pattern.compile("rokid|glasses", Pattern.CASE_INSENSITIVE)
 
+    // Custom SDP service the glasses firmware registers on the bonded link.
+    private val ROKID_GLASSES_SERVICE_UUID = java.util.UUID.fromString("3c36c196-e056-4e4f-b88e-2cb249365f00")
+
     fun hasAssociation(context: Context): Boolean {
         val manager = manager(context) ?: return false
         return runCatching {
@@ -54,32 +57,78 @@ object CompanionDeviceCoordinator {
     }
 
     fun requestAssociation(activity: Activity, onFailure: (String) -> Unit) {
+        // CDM happily stacks duplicate associations for the same device; keep one.
+        if (hasAssociation(activity)) {
+            startObserving(activity)
+            onFailure("Glasses already linked")
+            return
+        }
+        val bonded = bondedDevices(activity)
+        val likely = bonded.filter(::looksLikeGlasses)
+        when {
+            likely.size == 1 -> associateWithAddress(activity, likely.first().address, onFailure)
+            bonded.isEmpty() -> associateByScan(activity, onFailure)
+            else -> pickBondedDevice(activity, likely.ifEmpty { bonded }, onFailure)
+        }
+    }
+
+    /** The glasses name is user-editable, so let the user point at the right bonded device. */
+    private fun pickBondedDevice(activity: Activity, devices: List<BluetoothDevice>, onFailure: (String) -> Unit) {
+        val labels = devices.map { device ->
+            runCatching { device.alias ?: device.name }.getOrNull() ?: device.address
+        }
+        android.app.AlertDialog.Builder(activity)
+            .setTitle("Select your glasses")
+            .setItems(labels.toTypedArray()) { _, index ->
+                associateWithAddress(activity, devices[index].address, onFailure)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /**
+     * Single-device request with an explicit address: CDM matches it against bonded and
+     * connected devices before scanning, so the confirmation shows without any discovery.
+     */
+    private fun associateWithAddress(activity: Activity, address: String, onFailure: (String) -> Unit) {
+        Log.i(TAG, "requesting association with bonded $address")
+        associate(activity, onFailure) {
+            setSingleDevice(true)
+            addDeviceFilter(
+                BluetoothDeviceFilter.Builder()
+                    .setAddress(address)
+                    .build(),
+            )
+        }
+    }
+
+    /** Discovery fallback for glasses that are not bonded yet (they must be in pairing mode). */
+    private fun associateByScan(activity: Activity, onFailure: (String) -> Unit) {
+        associate(activity, onFailure) {
+            addDeviceFilter(
+                BluetoothDeviceFilter.Builder()
+                    .setNamePattern(GLASSES_NAME_PATTERN)
+                    .build(),
+            )
+            addDeviceFilter(
+                BluetoothLeDeviceFilter.Builder()
+                    .setNamePattern(GLASSES_NAME_PATTERN)
+                    .build(),
+            )
+        }
+    }
+
+    private fun associate(
+        activity: Activity,
+        onFailure: (String) -> Unit,
+        configure: AssociationRequest.Builder.() -> Unit,
+    ) {
         val manager = manager(activity) ?: run {
             onFailure("Companion device service unavailable")
             return
         }
-        val bondedGlasses = bondedGlasses(activity)
         val request = AssociationRequest.Builder().apply {
-            if (bondedGlasses != null) {
-                Log.i(TAG, "requesting association with bonded ${bondedGlasses.address}")
-                setSingleDevice(true)
-                addDeviceFilter(
-                    BluetoothDeviceFilter.Builder()
-                        .setAddress(bondedGlasses.address)
-                        .build(),
-                )
-            } else {
-                addDeviceFilter(
-                    BluetoothDeviceFilter.Builder()
-                        .setNamePattern(GLASSES_NAME_PATTERN)
-                        .build(),
-                )
-                addDeviceFilter(
-                    BluetoothLeDeviceFilter.Builder()
-                        .setNamePattern(GLASSES_NAME_PATTERN)
-                        .build(),
-                )
-            }
+            configure()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 setDeviceProfile(AssociationRequest.DEVICE_PROFILE_GLASSES)
             }
@@ -145,18 +194,24 @@ object CompanionDeviceCoordinator {
         }
     }
 
-    /** Needs BLUETOOTH_CONNECT; returns null when not granted or no Rokid device is bonded. */
-    private fun bondedGlasses(context: Context): BluetoothDevice? = runCatching {
-        context.getSystemService(BluetoothManager::class.java)?.adapter?.bondedDevices
-            ?.firstOrNull { device ->
-                sequenceOf(device.alias, device.name).filterNotNull().any {
-                    GLASSES_NAME_PATTERN.matcher(it).find()
-                }
-            }
+    /** Needs BLUETOOTH_CONNECT; empty when not granted or Bluetooth is off. */
+    private fun bondedDevices(context: Context): List<BluetoothDevice> = runCatching {
+        context.getSystemService(BluetoothManager::class.java)?.adapter?.bondedDevices?.toList()
     }.getOrElse {
         Log.w(TAG, "bonded device lookup failed: ${it.message}")
         null
-    }
+    }.orEmpty()
+
+    /**
+     * The user can rename the glasses to anything, so the name match is only a heuristic;
+     * the SDP service UUID published by the glasses firmware is checked as a second signal.
+     * Ambiguity falls back to the picker, so a false positive here costs one extra tap.
+     */
+    private fun looksLikeGlasses(device: BluetoothDevice): Boolean = runCatching {
+        sequenceOf(device.alias, device.name).filterNotNull().any {
+            GLASSES_NAME_PATTERN.matcher(it).find()
+        } || device.uuids?.any { it.uuid == ROKID_GLASSES_SERVICE_UUID } == true
+    }.getOrDefault(false)
 
     private fun launchChooser(activity: Activity, intentSender: IntentSender, onFailure: (String) -> Unit) {
         runCatching {
