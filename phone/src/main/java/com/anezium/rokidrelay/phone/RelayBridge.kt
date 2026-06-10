@@ -49,9 +49,6 @@ object RelayBridge {
     @Volatile private var lastVoiceError = ""
     @Volatile private var bootstrapStarted = false
     @Volatile private var bootstrapInFlight = false
-    @Volatile private var clientLaunchInFlight = false
-    @Volatile private var clientOpenedForConnection = false
-    @Volatile private var launchClientOnBootstrap = false
     @Volatile private var authToken = ""
     @Volatile private var pendingNotificationRetry: ReplyRepository.PendingReply? = null
     @Volatile private var reconnectRunnable: Runnable? = null
@@ -64,7 +61,6 @@ object RelayBridge {
         appContext = context.applicationContext
         authToken = token
         main.post {
-            if (shouldLaunchClientForReason(reason)) launchClientOnBootstrap = true
             startOnMain(context.applicationContext, token)
         }
     }
@@ -81,9 +77,6 @@ object RelayBridge {
             glassConnected = false
             bootstrapStarted = false
             bootstrapInFlight = false
-            clientLaunchInFlight = false
-            clientOpenedForConnection = false
-            launchClientOnBootstrap = false
             bootstrapState = "stopped"
             lastStatus = "stopped"
         }
@@ -287,9 +280,6 @@ object RelayBridge {
                 glassConnected = false
                 bootstrapStarted = false
                 bootstrapInFlight = false
-                clientLaunchInFlight = false
-                clientOpenedForConnection = false
-                launchClientOnBootstrap = false
                 bootstrapState = "not connected"
                 lastStatus = "CXR-L disconnected"
                 scheduleReconnect("CXR-L disconnected")
@@ -306,9 +296,6 @@ object RelayBridge {
             } else {
                 bootstrapStarted = false
                 bootstrapInFlight = false
-                clientLaunchInFlight = false
-                clientOpenedForConnection = false
-                launchClientOnBootstrap = false
                 bootstrapState = if (cxrConnected) "waiting for glasses" else "not connected"
             }
             maybeBootstrap()
@@ -382,21 +369,14 @@ object RelayBridge {
         if (!cxrConnected || !glassConnected) return
         if (bootstrapInFlight) return
         if (bootstrapStarted) {
-            maybeOpenClientForInteractiveStart(context, localLink)
             flushPendingNotification()
             return
         }
         bootstrapStarted = true
         bootstrapInFlight = true
-        bootstrapState = if (launchClientOnBootstrap) "starting glasses app" else "preparing glasses app"
+        bootstrapState = "preparing glasses app"
         Thread {
-            val bootstrapper = ClientBootstrap(context, localLink)
-            var result = bootstrapper.ensureReady(openClient = launchClientOnBootstrap)
-            if (result.success && launchClientOnBootstrap && !result.openedClient) {
-                result = bootstrapper.openClient()
-            }
-            clientOpenedForConnection = clientOpenedForConnection || result.openedClient
-            if (result.openedClient || !result.success) launchClientOnBootstrap = false
+            val result = ClientBootstrap(context, localLink).ensureReady()
             bootstrapInFlight = false
             bootstrapState = result.status
             lastStatus = result.status
@@ -409,38 +389,6 @@ object RelayBridge {
             start()
         }
     }
-
-    private fun maybeOpenClientForInteractiveStart(context: Context, localLink: CXRLink) {
-        if (!launchClientOnBootstrap || clientOpenedForConnection || clientLaunchInFlight) return
-        clientLaunchInFlight = true
-        bootstrapState = "starting glasses app"
-        Thread {
-            val result = ClientBootstrap(context, localLink).openClient()
-            clientOpenedForConnection = clientOpenedForConnection || result.openedClient
-            launchClientOnBootstrap = false
-            clientLaunchInFlight = false
-            bootstrapState = result.status
-            lastStatus = result.status
-            sendState()
-            if (result.success) flushPendingNotification()
-        }.apply {
-            name = "RokidRelayClientLaunch"
-            start()
-        }
-    }
-
-    private fun shouldLaunchClientForReason(reason: String): Boolean =
-        when (reason) {
-            "authorization",
-            "app_open",
-            "permissions",
-            "microphone_permission",
-            "stt_engine",
-            "stt_provider",
-            "stt_model",
-            -> true
-            else -> false
-        }
 
     private fun flushPendingNotification() {
         val pending = pendingNotificationRetry ?: return

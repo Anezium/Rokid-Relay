@@ -20,31 +20,21 @@ class ClientBootstrap(
         val openedClient: Boolean,
     )
 
-    fun ensureReady(openClient: Boolean): Result {
+    fun ensureReady(): Result {
         val installed = queryInstalled()
         val apk = extractAssetApk()
         val assetInfo = apk?.clientAssetInfo()
         val shouldInstall = !installed || bundledClientChanged(assetInfo)
-        val installedFromBundle = if (shouldInstall) {
-            if (apk == null) return Result("glasses asset missing", success = false, openedClient = false)
-            Log.i(TAG, "installing bundled glasses app ${assetInfo?.label.orEmpty().ifBlank { apk.name }}")
-            if (!installApk(apk)) return Result("glasses install failed", success = false, openedClient = false)
-            assetInfo?.let(::rememberInstalledClient)
-            true
-        } else {
-            false
+        if (!shouldInstall) {
+            return Result("glasses app ready in background", success = true, openedClient = false)
         }
-        if (!openClient) {
-            val status = if (installedFromBundle) {
-                "glasses app installed/updated in background"
-            } else {
-                "glasses app ready in background"
-            }
-            return Result(status, success = true, openedClient = false)
-        }
-        return openClient(
-            successStatus = if (installedFromBundle) "glasses app installed/updated" else "glasses app running",
-        )
+        if (apk == null) return Result("glasses asset missing", success = false, openedClient = false)
+        Log.i(TAG, "installing bundled glasses app ${assetInfo?.label.orEmpty().ifBlank { apk.name }}")
+        if (!installApk(apk)) return Result("glasses install failed", success = false, openedClient = false)
+        assetInfo?.let(::rememberInstalledClient)
+        // A freshly installed/updated build is not running yet; open it once so the HUD
+        // service comes up. Outside of installs the glasses app is never opened from here.
+        return openClient(successStatus = "glasses app installed/updated")
     }
 
     fun openClient(successStatus: String = "glasses app running"): Result {
