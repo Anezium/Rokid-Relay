@@ -47,9 +47,9 @@ class MainActivity : Activity() {
             KEYCODE_SWIPE_FORWARD,
             KEYCODE_SWIPE_BACK,
             -> {
-                keyInputSource(keyCode)?.let { source ->
-                    if (!RelayHudController.isInputSourceEnabled(source)) return true
-                }
+                // Direction keys all come from single-finger swipes; in two-finger mode
+                // they are ignored so only the two-finger broadcasts drive the relay.
+                if (!RelayHudController.isInputSourceEnabled(RelayInputSource.NORMAL)) return true
                 handleDirection(directionFromKey(keyCode) ?: return false)
             }
             KeyEvent.KEYCODE_ENTER,
@@ -136,14 +136,6 @@ class MainActivity : Activity() {
             KeyEvent.KEYCODE_DPAD_RIGHT,
             KEYCODE_SWIPE_FORWARD,
             -> RelayDirection.RIGHT
-            else -> null
-        }
-
-    private fun keyInputSource(keyCode: Int): RelayInputSource? =
-        when (keyCode) {
-            KEYCODE_SWIPE_BACK,
-            KEYCODE_SWIPE_FORWARD,
-            -> RelayInputSource.NORMAL
             else -> null
         }
 

@@ -144,9 +144,7 @@ class RelayAccessibilityService : AccessibilityService() {
         }
 
         directionFromKey(event.keyCode)?.let { direction ->
-            keyInputSource(event.keyCode)?.let { source ->
-                if (!RelayHudController.isInputSourceEnabled(source)) return true
-            }
+            if (!directionKeysEnabled()) return false
             if (RelayHudController.hasNotification()) {
                 keepReplyScreenOn()
                 if (!pageNotification(direction)) RelayBridge.startVoice()
@@ -209,9 +207,7 @@ class RelayAccessibilityService : AccessibilityService() {
         }
 
         directionFromKey(keyCode)?.let { direction ->
-            keyInputSource(keyCode)?.let { source ->
-                if (!RelayHudController.isInputSourceEnabled(source)) return true
-            }
+            if (!directionKeysEnabled()) return false
             tapArmed = false
             main.removeCallbacks(singleTapRunnable)
             if (RelayHudController.isInboxDetailOpen()) {
@@ -347,18 +343,16 @@ class RelayAccessibilityService : AccessibilityService() {
             else -> null
         }
 
-    private fun keyInputSource(keyCode: Int): RelayInputSource? =
-        when (keyCode) {
-            KEYCODE_SWIPE_BACK,
-            KEYCODE_SWIPE_FORWARD,
-            KeyEvent.KEYCODE_MEDIA_PREVIOUS,
-            KeyEvent.KEYCODE_MEDIA_NEXT,
-            -> RelayInputSource.NORMAL
-            else -> null
-        }
+    /**
+     * Every directional key event (DPAD, media, swipe keycodes) comes from a single-finger
+     * swipe; two-finger swipes arrive as broadcasts only. In two-finger mode these keys are
+     * passed back to the system so single-finger keeps driving the regular glasses UI.
+     */
+    private fun directionKeysEnabled(): Boolean =
+        RelayHudController.isInputSourceEnabled(RelayInputSource.NORMAL)
 
     private fun isRelayControlKey(keyCode: Int): Boolean =
-        directionFromKey(keyCode) != null ||
+        (directionFromKey(keyCode) != null && directionKeysEnabled()) ||
             isConfirmKey(keyCode) ||
             keyCode == KeyEvent.KEYCODE_BACK
 
