@@ -827,14 +827,15 @@ class MainActivity : Activity() {
                             }
                         }
                         button.gravity = Gravity.CENTER
+                        button.includeFontPadding = false
                         button.setPadding(dp(4), 0, dp(4), 0)
                         languageButtons[language] = button
-                        addView(button, LinearLayout.LayoutParams(0, dp(40), 1f).apply {
+                        addView(button, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
                             if (index > 0) leftMargin = dp(8)
                         })
                     }
                     repeat(LANGUAGE_GRID_COLUMNS - rowLanguages.size) {
-                        addView(View(this@MainActivity), LinearLayout.LayoutParams(0, dp(40), 1f).apply {
+                        addView(View(this@MainActivity), LinearLayout.LayoutParams(0, dp(46), 1f).apply {
                             leftMargin = dp(8)
                         })
                     }
@@ -1071,7 +1072,7 @@ class MainActivity : Activity() {
                 selectedEngine.credentialKind == SpeechToTextCredentialKind.AZURE && azureRegion.isNullOrBlank() ->
                     "${selectedEngine.displayName}. Set the Azure region."
                 selectedEngine.credentialKind == SpeechToTextCredentialKind.AZURE ->
-                    "${selectedEngine.displayName}. Buffered glasses audio, transcribed after you stop speaking (not realtime)."
+                    "${selectedEngine.displayName}. Buffered glasses audio — not realtime, no live text."
                 selectedEngine.requiresMicrophonePermission ->
                     "${selectedEngine.displayName}. Uses glasses PCM through Android recognition."
                 selectedEngine.usesRealtime ->
@@ -1079,7 +1080,7 @@ class MainActivity : Activity() {
                 else ->
                     "${selectedEngine.displayName}. Uses buffered glasses audio."
             }
-            sttSummary.setTextColor(if (sttReady) COLOR_TEXT else COLOR_MUTED)
+            sttSummary.setTextColor(COLOR_TEXT)
         }
 
         if (::notificationForwardingSummary.isInitialized) {
