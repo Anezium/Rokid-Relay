@@ -32,4 +32,6 @@ android {
 
 dependencies {
     implementation("com.rokid.cxr:cxr-service-bridge:1.0-20260522.063600-105")
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.13")
 }

@@ -309,9 +309,9 @@ object RelayHudController {
         if (!snapshot.inboxVisible || !snapshot.inboxDetail) return false
         val selected = snapshot.inbox.getOrNull(snapshot.inboxIndex) ?: return true
         val pageCount = NotificationTextPager.pageCount(selected.text, snapshot.notificationFontSizeSp)
-        if (pageCount <= 1) return true
+        if (pageCount <= 1) return false
         val nextPage = (snapshot.inboxDetailPage + delta).coerceIn(0, pageCount - 1)
-        if (nextPage == snapshot.inboxDetailPage) return true
+        if (nextPage == snapshot.inboxDetailPage) return false
         update {
             copy(
                 inboxDetailPage = nextPage,
@@ -455,6 +455,12 @@ object RelayHudController {
 
     fun isInputSourceEnabled(source: RelayInputSource): Boolean =
         RelayInputSettings.sourceEnabled(state.swipeMode, source)
+
+    fun directionKeysEnabled(): Boolean =
+        RelayInputSettings.directionKeysEnabled(state.swipeMode, state.inboxVisible)
+
+    fun twoFingerCommandsEnabled(): Boolean =
+        RelayInputSettings.twoFingerCommandsEnabled(state.swipeMode, state.inboxVisible)
 
     private fun setAccessibilityEnabled(enabled: Boolean) {
         update { copy(accessibilityEnabled = enabled) }

@@ -41,6 +41,12 @@ object RelayInputSettings {
             else -> source == RelayInputSource.NORMAL
         }
 
+    fun directionKeysEnabled(mode: String, inboxOpen: Boolean): Boolean =
+        inboxOpen || sourceEnabled(mode, RelayInputSource.NORMAL)
+
+    fun twoFingerCommandsEnabled(mode: String, inboxOpen: Boolean): Boolean =
+        !inboxOpen && sourceEnabled(mode, RelayInputSource.TWO_FINGER)
+
     fun matchesCombo(buffer: List<RelayDirection>, combo: String): Boolean {
         val expected = sanitizeCombo(combo)
         if (buffer.size < expected.length) return false

@@ -10,6 +10,8 @@ import android.graphics.RectF
 import android.graphics.drawable.GradientDrawable
 import android.os.SystemClock
 import android.text.TextUtils
+import android.text.TextPaint
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -27,6 +29,12 @@ class RelayHudView(
         val title: String,
         val text: String,
     )
+
+    private enum class MessageBodyMode {
+        NOTIFICATION_PAGE,
+        EMPTY_INBOX,
+        VOICE_TRANSCRIPT,
+    }
 
     private val header = label(20f, ACCENT)
     private val connectionLabel = label(15f, DIM)
@@ -205,8 +213,7 @@ class RelayHudView(
 
         titleLabel.maxLines = 1
         titleLabel.ellipsize = TextUtils.TruncateAt.END
-        messageLabel.maxLines = 6
-        messageLabel.maxHeight = dp(154)
+        messageLabel.maxLines = NOTIFICATION_PAGE_MAX_LINES
         messageLabel.ellipsize = TextUtils.TruncateAt.END
         hintLabel.maxLines = 1
         hintLabel.ellipsize = TextUtils.TruncateAt.END
@@ -276,7 +283,7 @@ class RelayHudView(
         titleLabel.setTextColor(TEXT)
         appLabel.text = model.app.ifBlank { "Message" }
         titleLabel.text = model.title.ifBlank { "Replyable notification" }
-        val pages = NotificationTextPager.pages(model.text, notificationFontSizeSp)
+        val pages = notificationPages(model.text)
         val pageIndex = notificationPage.coerceIn(0, pages.lastIndex)
         val hasVoiceTranscript = renderMessageBody(pages[pageIndex])
         renderStatus(hasVoiceTranscript)
@@ -312,9 +319,11 @@ class RelayHudView(
         if (inbox.isEmpty()) {
             hideInboxRows()
             titleLabel.text = "Inbox"
-            messageLabel.visibility = VISIBLE
-            messageLabel.maxLines = 2
-            messageLabel.text = "No replyable notifications"
+            applyMessageText(
+                text = "No replyable notifications",
+                mode = MessageBodyMode.EMPTY_INBOX,
+                textSizeSp = notificationFontSizeSp,
+            )
             hintLabel.visibility = GONE
             return
         }
@@ -327,7 +336,7 @@ class RelayHudView(
             messageLabel.visibility = VISIBLE
             appLabel.text = selected.app.ifBlank { "Message" }
             titleLabel.text = selected.title.ifBlank { "Replyable notification" }
-            val pages = NotificationTextPager.pages(selected.text, notificationFontSizeSp)
+            val pages = notificationPages(selected.text)
             val pageIndex = inboxDetailPage.coerceIn(0, pages.lastIndex)
             val hasVoiceTranscript = renderMessageBody(pages[pageIndex])
             renderStatus(hasVoiceTranscript)
@@ -353,7 +362,7 @@ class RelayHudView(
                 val selectedRow = start + rowIndex == selectedIndex
                 row.visibility = VISIBLE
                 row.setTextColor(if (selectedRow) ACCENT else TEXT)
-                val preview = oneLine(NotificationTextPager.page(item.text, 0, notificationFontSizeSp))
+                val preview = oneLine(NotificationTextPager.page(item.text, 0, notificationTextPaint(), notificationLayoutSpec()))
                 row.text = "${if (selectedRow) ">" else " "} ${item.app.ifBlank { "Message" }}: " +
                     item.title.ifBlank { preview.ifBlank { "Replyable notification" } } +
                     "  $preview"
@@ -394,17 +403,6 @@ class RelayHudView(
         }
     }
 
-    private fun popupMessageLines(text: String): Int {
-        val lineBreaks = text.count { it == '\n' }
-        return when {
-            text.length > 300 || lineBreaks >= 5 -> 6
-            text.length > 220 || lineBreaks >= 4 -> 5
-            text.length > 130 || lineBreaks >= 2 -> 4
-            text.length > 70 || lineBreaks >= 1 -> 3
-            else -> 2
-        }
-    }
-
     private fun renderMessageBody(notificationText: String): Boolean {
         val transcript = activeVoiceTranscript()
         val hasVoiceTranscript = transcript.isNotBlank()
@@ -413,25 +411,73 @@ class RelayHudView(
         } else {
             notificationText.ifBlank { "(no preview)" }
         }
-        messageLabel.text = body
         val bodyTextSize = popupBodyTextSize(body, hasVoiceTranscript)
-        val bodyLines = if (hasVoiceTranscript) {
-            popupVoiceLines(body)
-        } else {
-            popupMessageLines(notificationText)
-        }
-        messageLabel.textSize = bodyTextSize
-        messageLabel.setLineSpacing(
-            if (hasVoiceTranscript) dp(1).toFloat() else 0f,
-            if (hasVoiceTranscript) 1.08f else 1.02f,
+        applyMessageText(
+            text = body,
+            mode = if (hasVoiceTranscript) {
+                MessageBodyMode.VOICE_TRANSCRIPT
+            } else {
+                MessageBodyMode.NOTIFICATION_PAGE
+            },
+            textSizeSp = bodyTextSize,
         )
-        messageLabel.maxLines = bodyLines
-        messageLabel.maxHeight = if (hasVoiceTranscript) {
-            popupVoiceMaxHeight(body, bodyTextSize)
-        } else {
-            popupTextMaxHeight(bodyLines, bodyTextSize)
-        }
         return hasVoiceTranscript
+    }
+
+    private fun applyMessageText(
+        text: String,
+        mode: MessageBodyMode,
+        textSizeSp: Float,
+    ) {
+        messageLabel.visibility = VISIBLE
+        messageLabel.text = text
+        messageLabel.textSize = textSizeSp
+        messageLabel.setLineSpacing(
+            if (mode == MessageBodyMode.VOICE_TRANSCRIPT) dp(1).toFloat() else 1f,
+            if (mode == MessageBodyMode.VOICE_TRANSCRIPT) 1.08f else 1.02f,
+        )
+        messageLabel.maxLines = when (mode) {
+            MessageBodyMode.NOTIFICATION_PAGE -> NOTIFICATION_PAGE_MAX_LINES
+            MessageBodyMode.EMPTY_INBOX -> 2
+            MessageBodyMode.VOICE_TRANSCRIPT -> popupVoiceLines(text)
+        }
+        messageLabel.maxHeight = if (mode == MessageBodyMode.VOICE_TRANSCRIPT) {
+            popupVoiceMaxHeight(text, textSizeSp)
+        } else {
+            Int.MAX_VALUE
+        }
+    }
+
+    private fun notificationPages(text: String): List<String> =
+        NotificationTextPager.pages(text, notificationTextPaint(), notificationLayoutSpec())
+
+    private fun notificationTextPaint(): TextPaint =
+        TextPaint(messageLabel.paint).apply {
+            textSize = TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_SP,
+                notificationFontSizeSp,
+                resources.displayMetrics,
+            )
+        }
+
+    private fun notificationLayoutSpec(): NotificationTextPager.LayoutSpec =
+        NotificationTextPager.LayoutSpec(
+            widthPx = messageTextWidthPx(),
+            maxLines = NOTIFICATION_PAGE_MAX_LINES,
+            lineSpacingAddPx = 1f,
+            lineSpacingMultiplier = 1.02f,
+        )
+
+    private fun messageTextWidthPx(): Int {
+        val labelWidth = messageLabel.width - messageLabel.paddingLeft - messageLabel.paddingRight
+        if (labelWidth > 0) return labelWidth
+        val parentWidth = width - paddingLeft - paddingRight
+        if (parentWidth > 0) return parentWidth
+        val screenWidth = resources.displayMetrics.widthPixels
+        val popupWidth = (screenWidth - dp(20))
+            .coerceAtLeast((screenWidth * 0.9f).toInt())
+            .coerceAtMost(screenWidth - dp(8))
+        return (popupWidth - paddingLeft - paddingRight).coerceAtLeast(dp(160))
     }
 
     private fun renderStatus(hasVoiceTranscript: Boolean) {
@@ -509,9 +555,6 @@ class RelayHudView(
             else -> baseSp
         }
     }
-
-    private fun popupTextMaxHeight(lineCount: Int, textSizeSp: Float): Int =
-        dp((Math.round(textSizeSp * 1.32f * lineCount) + 4).coerceIn(40, 220))
 
     private fun applyPopupFontSize() {
         if (!overlayMode) return
@@ -637,5 +680,7 @@ class RelayHudView(
         private val TEXT = Color.rgb(210, 255, 222)
         private val DIM = Color.rgb(105, 148, 118)
         private val RULE = Color.rgb(40, 78, 50)
+
+        private const val NOTIFICATION_PAGE_MAX_LINES = 9
     }
 }

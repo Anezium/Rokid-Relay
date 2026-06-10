@@ -41,17 +41,11 @@ class MainActivity : Activity() {
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         if (event?.repeatCount ?: 0 > 0) return true
+        RelayDirectionKeyMapper.directionFromKey(keyCode)?.let { direction ->
+            if (!RelayHudController.directionKeysEnabled()) return super.onKeyDown(keyCode, event)
+            return handleDirection(direction)
+        }
         return when (keyCode) {
-            KeyEvent.KEYCODE_DPAD_LEFT,
-            KeyEvent.KEYCODE_DPAD_RIGHT,
-            KEYCODE_SWIPE_FORWARD,
-            KEYCODE_SWIPE_BACK,
-            -> {
-                // Direction keys all come from single-finger swipes; in two-finger mode
-                // they are ignored so only the two-finger broadcasts drive the relay.
-                if (!RelayHudController.isInputSourceEnabled(RelayInputSource.NORMAL)) return true
-                handleDirection(directionFromKey(keyCode) ?: return false)
-            }
             KeyEvent.KEYCODE_ENTER,
             KeyEvent.KEYCODE_DPAD_CENTER,
             -> {
@@ -83,6 +77,7 @@ class MainActivity : Activity() {
 
     private fun handleDirection(direction: RelayDirection): Boolean {
         if (RelayHudController.isVoiceActive()) return true
+        if (!directionDebouncer.accept(direction, SystemClock.elapsedRealtime())) return true
         if (RelayHudController.isInboxDetailOpen()) {
             pageInboxDetail(direction)
             return true
@@ -105,39 +100,21 @@ class MainActivity : Activity() {
     }
 
     private fun pageInboxDetail(direction: RelayDirection) {
-        val now = SystemClock.elapsedRealtime()
-        if (now - lastInboxPageAtMs < INBOX_PAGE_DEBOUNCE_MS) return
-        lastInboxPageAtMs = now
         RelayHudController.pageInboxDetail(if (direction == RelayDirection.LEFT) -1 else 1)
     }
 
     private fun pageNotification(direction: RelayDirection): Boolean {
         if (!RelayHudController.hasPagedNotification()) return false
-        val now = SystemClock.elapsedRealtime()
-        if (now - lastInboxPageAtMs < INBOX_PAGE_DEBOUNCE_MS) return true
-        lastInboxPageAtMs = now
         return RelayHudController.pageNotification(if (direction == RelayDirection.LEFT) -1 else 1)
     }
 
     private fun addToCombo(direction: RelayDirection): Boolean {
-        val now = System.currentTimeMillis()
-        if (now - lastComboInputAt > COMBO_TIMEOUT_MS) comboBuffer.clear()
-        lastComboInputAt = now
-        comboBuffer.add(direction)
-        while (comboBuffer.size > RelayInputSettings.MAX_COMBO_LENGTH) comboBuffer.removeAt(0)
-        return RelayInputSettings.matchesCombo(comboBuffer, RelayHudController.inputCombo())
+        return comboBuffer.add(
+            nowMs = SystemClock.elapsedRealtime(),
+            direction = direction,
+            combo = RelayHudController.inputCombo(),
+        ).matched
     }
-
-    private fun directionFromKey(keyCode: Int): RelayDirection? =
-        when (keyCode) {
-            KeyEvent.KEYCODE_DPAD_LEFT,
-            KEYCODE_SWIPE_BACK,
-            -> RelayDirection.LEFT
-            KeyEvent.KEYCODE_DPAD_RIGHT,
-            KEYCODE_SWIPE_FORWARD,
-            -> RelayDirection.RIGHT
-            else -> null
-        }
 
     private fun openAccessibilitySettings() {
         RelayHudController.showTransient("Enable Rokid Relay accessibility")
@@ -149,14 +126,6 @@ class MainActivity : Activity() {
         }
     }
 
-    companion object {
-        private const val KEYCODE_SWIPE_FORWARD = 183
-        private const val KEYCODE_SWIPE_BACK = 184
-        private const val COMBO_TIMEOUT_MS = 2_200L
-        private const val INBOX_PAGE_DEBOUNCE_MS = 480L
-    }
-
-    private val comboBuffer = ArrayList<RelayDirection>(RelayInputSettings.MAX_COMBO_LENGTH)
-    private var lastComboInputAt = 0L
-    private var lastInboxPageAtMs = 0L
+    private val comboBuffer = RelayInputComboBuffer()
+    private val directionDebouncer = RelayDirectionDebouncer()
 }

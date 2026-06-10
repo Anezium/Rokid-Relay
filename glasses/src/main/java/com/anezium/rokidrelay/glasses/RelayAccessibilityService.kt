@@ -57,13 +57,15 @@ class RelayAccessibilityService : AccessibilityService() {
     private var replyWakeLock: PowerManager.WakeLock? = null
     private var audioManager: AudioManager? = null
     private var commandVolume: VolumeSnapshot? = null
+    private var clearCommandVolumeRunnable: Runnable? = null
     private var lastReplyWakeSignature = ""
     private var lastReplyWakeAtMs = 0L
-    private var lastComboInputAt = 0L
-    private var lastInboxPageAtMs = 0L
+    private val directionDebouncer = RelayDirectionDebouncer()
+    private val inboxDirectionGate = RelayInboxDirectionGate()
+    private var lastAppliedInboxDirection: AppliedInboxDirection? = null
     private var tapArmed = false
     private val grabbedKeys = HashSet<Int>()
-    private val comboBuffer = ArrayList<RelayDirection>(RelayInputSettings.MAX_COMBO_LENGTH)
+    private val comboBuffer = RelayInputComboBuffer()
     private val singleTapRunnable = Runnable {
         tapArmed = false
         runInboxSingleTap()
@@ -145,6 +147,7 @@ class RelayAccessibilityService : AccessibilityService() {
 
         directionFromKey(event.keyCode)?.let { direction ->
             if (!directionKeysEnabled()) return false
+            if (!directionDebouncer.accept(direction, SystemClock.elapsedRealtime())) return relayActive
             if (RelayHudController.hasNotification()) {
                 keepReplyScreenOn()
                 if (!pageNotification(direction)) RelayBridge.startVoice()
@@ -179,6 +182,9 @@ class RelayAccessibilityService : AccessibilityService() {
         hideOverlay()
         runCatching { unregisterReceiver(twoFingerReceiver) }
         main.removeCallbacks(singleTapRunnable)
+        lastAppliedInboxDirection = null
+        clearCommandVolumeRunnable?.let { main.removeCallbacks(it) }
+        clearCommandVolumeRunnable = null
         RelayHudController.removeNotificationShownListener(notificationWakeListener)
         RelayHudController.removeStateListener(replyWakeListener)
         releaseReplyWakeLock()
@@ -207,15 +213,11 @@ class RelayAccessibilityService : AccessibilityService() {
         }
 
         directionFromKey(keyCode)?.let { direction ->
-            if (!directionKeysEnabled()) return false
-            tapArmed = false
-            main.removeCallbacks(singleTapRunnable)
-            if (RelayHudController.isInboxDetailOpen()) {
-                pageInboxDetail(direction)
-            } else {
-                RelayHudController.navigateInbox(if (direction == RelayDirection.LEFT) -1 else 1)
+            val now = SystemClock.elapsedRealtime()
+            if (!directionDebouncer.accept(direction, now)) return true
+            if (inboxDirectionGate.acceptDirectionKey(now)) {
+                lastAppliedInboxDirection = applyInboxDirection(direction, now)
             }
-            keepReplyScreenOn(INBOX_WAKE_MS)
             return true
         }
 
@@ -235,6 +237,7 @@ class RelayAccessibilityService : AccessibilityService() {
     }
 
     private fun handleInboxTap() {
+        lastAppliedInboxDirection = null
         if (tapArmed) {
             tapArmed = false
             main.removeCallbacks(singleTapRunnable)
@@ -257,57 +260,89 @@ class RelayAccessibilityService : AccessibilityService() {
     }
 
     private fun handleInboxBack() {
+        lastAppliedInboxDirection = null
         if (RelayHudController.isVoiceActive()) RelayBridge.cancelVoice()
         RelayHudController.backInInbox()
     }
 
     private fun onTwoFinger(direction: RelayDirection) {
-        if (!RelayHudController.isInputSourceEnabled(RelayInputSource.TWO_FINGER)) return
-        if (commandVolume == null) commandVolume = VolumeSnapshot.capture(audioManager)
+        val now = SystemClock.elapsedRealtime()
         if (RelayHudController.isInboxOpen()) {
-            if (RelayHudController.isInboxDetailOpen()) {
-                pageInboxDetail(direction)
-            } else {
-                RelayHudController.navigateInbox(if (direction == RelayDirection.LEFT) -1 else 1)
-            }
-            keepReplyScreenOn(INBOX_WAKE_MS)
-            restoreCommandVolumeSoon()
+            suppressInboxDirectionForTwoFinger(now)
             return
         }
+        if (!RelayHudController.twoFingerCommandsEnabled()) return
+        suppressInboxDirectionForTwoFinger(now)
+        if (!directionDebouncer.accept(direction, now)) return
         if (RelayHudController.hasNotification()) {
+            if (commandVolume == null) commandVolume = VolumeSnapshot.capture(audioManager)
             keepReplyScreenOn()
             if (!pageNotification(direction)) RelayBridge.startVoice()
             restoreCommandVolumeSoon()
             return
         }
-        if (addToCombo(direction)) {
+
+        val hadComboInput = comboBuffer.snapshot().isNotEmpty()
+        val comboResult = addToCombo(direction)
+        if (!hadComboInput || comboResult.resetBeforeAdd) {
+            commandVolume = VolumeSnapshot.capture(audioManager)
+        }
+        if (comboResult.matched) {
             comboBuffer.clear()
             RelayHudController.openInbox()
             keepReplyScreenOn(INBOX_WAKE_MS)
+            restoreCommandVolumeSoon()
+        } else {
+            scheduleCommandVolumeClear()
         }
-        restoreCommandVolumeSoon()
+    }
+
+    private fun applyInboxDirection(direction: RelayDirection, nowMs: Long): AppliedInboxDirection? {
+        tapArmed = false
+        main.removeCallbacks(singleTapRunnable)
+        if (!RelayHudController.isInboxOpen() || RelayHudController.isVoiceActive()) return null
+        val kind = if (RelayHudController.isInboxDetailOpen()) {
+            if (!pageInboxDetail(direction)) return null
+            AppliedInboxDirection.Kind.DETAIL_PAGE
+        } else {
+            RelayHudController.navigateInbox(if (direction == RelayDirection.LEFT) -1 else 1)
+            AppliedInboxDirection.Kind.LIST
+        }
+        keepReplyScreenOn(INBOX_WAKE_MS)
+        return AppliedInboxDirection(kind, direction, nowMs)
+    }
+
+    private fun suppressInboxDirectionForTwoFinger(nowMs: Long) {
+        inboxDirectionGate.onTwoFinger(nowMs)
+        undoRecentInboxDirectionForTwoFinger(nowMs)
+    }
+
+    private fun undoRecentInboxDirectionForTwoFinger(nowMs: Long) {
+        val applied = lastAppliedInboxDirection ?: return
+        if (!inboxDirectionGate.shouldUndoDirectionForTwoFinger(applied.receivedAtMs, nowMs)) return
+        lastAppliedInboxDirection = null
+        if (!RelayHudController.isInboxOpen() || RelayHudController.isVoiceActive()) return
+        val reverseDelta = if (applied.direction == RelayDirection.LEFT) 1 else -1
+        when (applied.kind) {
+            AppliedInboxDirection.Kind.LIST -> RelayHudController.navigateInbox(reverseDelta)
+            AppliedInboxDirection.Kind.DETAIL_PAGE -> RelayHudController.pageInboxDetail(reverseDelta)
+        }
     }
 
     private fun handleDirectionalComboFallback(direction: RelayDirection): Boolean {
-        if (!addToCombo(direction)) return false
+        if (!addToCombo(direction).matched) return false
         comboBuffer.clear()
         RelayHudController.openInbox()
         keepReplyScreenOn(INBOX_WAKE_MS)
         return true
     }
 
-    private fun pageInboxDetail(direction: RelayDirection) {
-        val now = SystemClock.elapsedRealtime()
-        if (now - lastInboxPageAtMs < INBOX_PAGE_DEBOUNCE_MS) return
-        lastInboxPageAtMs = now
-        RelayHudController.pageInboxDetail(if (direction == RelayDirection.LEFT) -1 else 1)
+    private fun pageInboxDetail(direction: RelayDirection): Boolean {
+        return RelayHudController.pageInboxDetail(if (direction == RelayDirection.LEFT) -1 else 1)
     }
 
     private fun pageNotification(direction: RelayDirection): Boolean {
         if (!RelayHudController.hasPagedNotification()) return false
-        val now = SystemClock.elapsedRealtime()
-        if (now - lastInboxPageAtMs < INBOX_PAGE_DEBOUNCE_MS) return true
-        lastInboxPageAtMs = now
         return RelayHudController.pageNotification(if (direction == RelayDirection.LEFT) -1 else 1)
     }
 
@@ -318,38 +353,21 @@ class RelayAccessibilityService : AccessibilityService() {
             NOTIFICATION_VISIBLE_WAKE_MS
         }
 
-    private fun addToCombo(direction: RelayDirection): Boolean {
-        val now = System.currentTimeMillis()
-        if (now - lastComboInputAt > COMBO_TIMEOUT_MS) {
-            comboBuffer.clear()
-            commandVolume = null
-        }
-        lastComboInputAt = now
-        comboBuffer.add(direction)
-        while (comboBuffer.size > RelayInputSettings.MAX_COMBO_LENGTH) comboBuffer.removeAt(0)
-        return RelayInputSettings.matchesCombo(comboBuffer, RelayHudController.inputCombo())
-    }
+    private fun addToCombo(direction: RelayDirection): RelayInputComboBuffer.Result =
+        comboBuffer.add(
+            nowMs = SystemClock.elapsedRealtime(),
+            direction = direction,
+            combo = RelayHudController.inputCombo(),
+        )
 
     private fun directionFromKey(keyCode: Int): RelayDirection? =
-        when (keyCode) {
-            KeyEvent.KEYCODE_DPAD_LEFT,
-            KeyEvent.KEYCODE_MEDIA_PREVIOUS,
-            KEYCODE_SWIPE_BACK,
-            -> RelayDirection.LEFT
-            KeyEvent.KEYCODE_DPAD_RIGHT,
-            KeyEvent.KEYCODE_MEDIA_NEXT,
-            KEYCODE_SWIPE_FORWARD,
-            -> RelayDirection.RIGHT
-            else -> null
-        }
+        RelayDirectionKeyMapper.directionFromKey(keyCode)
 
     /**
-     * Every directional key event (DPAD, media, swipe keycodes) comes from a single-finger
-     * swipe; two-finger swipes arrive as broadcasts only. In two-finger mode these keys are
-     * passed back to the system so single-finger keeps driving the regular glasses UI.
+     * Direction keys come from single-finger swipes; two-finger swipes arrive as broadcasts.
      */
     private fun directionKeysEnabled(): Boolean =
-        RelayHudController.isInputSourceEnabled(RelayInputSource.NORMAL)
+        RelayHudController.directionKeysEnabled()
 
     private fun isRelayControlKey(keyCode: Int): Boolean =
         (directionFromKey(keyCode) != null && directionKeysEnabled()) ||
@@ -366,11 +384,23 @@ class RelayAccessibilityService : AccessibilityService() {
 
     private fun restoreCommandVolumeSoon() {
         val snapshot = commandVolume ?: return
+        clearCommandVolumeRunnable?.let { main.removeCallbacks(it) }
+        clearCommandVolumeRunnable = null
         main.postDelayed({ snapshot.restore(audioManager) }, 80L)
         main.postDelayed({
             snapshot.restore(audioManager)
-            if (!RelayHudController.isInboxOpen()) commandVolume = null
+            commandVolume = null
         }, 300L)
+    }
+
+    private fun scheduleCommandVolumeClear() {
+        clearCommandVolumeRunnable?.let { main.removeCallbacks(it) }
+        val runnable = Runnable {
+            commandVolume = null
+            clearCommandVolumeRunnable = null
+        }
+        clearCommandVolumeRunnable = runnable
+        main.postDelayed(runnable, RelayInputComboBuffer.DEFAULT_TIMEOUT_MS + COMMAND_VOLUME_CLEAR_MARGIN_MS)
     }
 
     private fun showOverlay() {
@@ -498,11 +528,7 @@ class RelayAccessibilityService : AccessibilityService() {
             "com.android.action.ACTION_TWO_FINGER_SWIPE_FORWARD"
         private const val ACTION_TWO_FINGER_SWIPE_BACK =
             "com.android.action.ACTION_TWO_FINGER_SWIPE_BACK"
-        private const val KEYCODE_SWIPE_FORWARD = 183
-        private const val KEYCODE_SWIPE_BACK = 184
-        private const val COMBO_TIMEOUT_MS = 2_200L
         private const val DOUBLE_TAP_MS = 220L
-        private const val INBOX_PAGE_DEBOUNCE_MS = 480L
         private const val NOTIFICATION_WAKE_MS = 5_000L
         private const val NOTIFICATION_WAKE_MARGIN_MS = 2_000L
         private const val MIN_NOTIFICATION_WAKE_MS = 5_000L
@@ -513,6 +539,7 @@ class RelayAccessibilityService : AccessibilityService() {
         private const val REVIEW_WAKE_MARGIN_MS = 2_500L
         private const val INBOX_WAKE_MS = 30_000L
         private const val POST_REPLY_WAKE_MS = 4_000L
+        private const val COMMAND_VOLUME_CLEAR_MARGIN_MS = 200L
         private val CONFIRM_KEYS = setOf(
             KeyEvent.KEYCODE_ENTER,
             KeyEvent.KEYCODE_DPAD_CENTER,
@@ -524,6 +551,18 @@ class RelayAccessibilityService : AccessibilityService() {
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    private data class AppliedInboxDirection(
+        val kind: Kind,
+        val direction: RelayDirection,
+        val receivedAtMs: Long,
+    ) {
+        enum class Kind {
+            LIST,
+            DETAIL_PAGE,
+        }
+    }
+
     private class VolumeSnapshot(
         private val music: Int,
         private val system: Int,
