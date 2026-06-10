@@ -122,6 +122,7 @@ class MainActivity : Activity() {
         super.onResume()
         if (!runtimePermissionRequestInFlight) {
             autoStartOrAuthorize("app_open")
+            CompanionDeviceCoordinator.startObserving(this)
             RelayService.refreshForeground()
             handler.postDelayed({
                 RelayService.refreshForeground()
@@ -158,6 +159,17 @@ class MainActivity : Activity() {
     @Deprecated("Hi Rokid still returns authorization through onActivityResult")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == Constants.COMPANION_REQUEST_CODE) {
+            val address = CompanionDeviceCoordinator.handleAssociationResult(this, resultCode, data)
+            if (address != null) {
+                RelayService.refreshForeground()
+                toastLine("Glasses linked as companion device")
+            } else if (resultCode != Activity.RESULT_CANCELED) {
+                toastLine("Companion link failed")
+            }
+            renderStatus()
+            return
+        }
         if (requestCode != Constants.AUTH_REQUEST_CODE) return
         authRequestInFlight = false
 
@@ -839,6 +851,7 @@ class MainActivity : Activity() {
         val elevenLabsLabel = stt.accountLabel(SpeechToTextCredentialKind.ELEVENLABS)
         val sttReady = sttReady(selectedEngine, stt)
         val micPermissionGranted = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        val companionLinked = CompanionDeviceCoordinator.hasAssociation(this)
         maybeAutoReauthorizeAfterBindFailure(snap, authSaved)
 
         if (::setupRows.isInitialized) {
@@ -872,6 +885,18 @@ class MainActivity : Activity() {
                 },
             ), matchWrap(top = 8))
             setupRows.addView(setupRow(
+                title = "Companion link",
+                value = if (companionLinked) "Glasses linked" else "Needed for background mic",
+                tone = if (companionLinked) StatusTone.Ready else StatusTone.Waiting,
+                actionLabel = "Link",
+                actionTone = if (companionLinked) ButtonTone.Secondary else ButtonTone.Primary,
+                onClick = {
+                    CompanionDeviceCoordinator.requestAssociation(this) { message ->
+                        handler.post { toastLine(message) }
+                    }
+                },
+            ), matchWrap(top = 8))
+            setupRows.addView(setupRow(
                 title = "Battery",
                 value = if (batteryUnrestricted) "Unrestricted" else "Recommended: set Unrestricted",
                 tone = if (batteryUnrestricted) StatusTone.Ready else StatusTone.Waiting,
@@ -898,6 +923,8 @@ class MainActivity : Activity() {
                 !authSaved -> "Authorize once, then the relay can start automatically."
                 !notifications -> "Notification access is still required."
                 !sttReady -> "Finish speech-to-text setup for voice replies."
+                selectedEngine.requiresMicrophonePermission && !companionLinked ->
+                    "Link the glasses as companion device so the mic works in the background."
                 !batteryUnrestricted -> "Ready. Set battery to Unrestricted for best reliability."
                 RelayService.running && NotificationForwardingPolicy.isPaused(this) ->
                     "Ready. Forwarding is paused while this screen is on."

@@ -69,7 +69,12 @@ object VoiceController {
             voiceActive = true
 
             val routedToGlasses = runCatching { link.setCommunicationDevice() }.getOrDefault(false)
-            Log.i(TAG, "Starting voice capture engine=${selectedEngine.id} routedToGlasses=$routedToGlasses")
+            // Keep the Hi Rokid AI assistant from grabbing the shared glasses audio stream mid-capture.
+            val aiWakeSuppressed = runCatching { link.setInterruptAiWake(true) }.getOrDefault(false)
+            Log.i(
+                TAG,
+                "Starting voice capture engine=${selectedEngine.id} routedToGlasses=$routedToGlasses aiWakeSuppressed=$aiWakeSuppressed",
+            )
             RelayBridge.sendVoiceState("listening")
             RelayBridge.recordVoiceStart(
                 selectedEngine,
@@ -389,6 +394,7 @@ object VoiceController {
         activeRealtimeSession = null
         activeCapture?.stop()
         activeCapture = null
+        runCatching { activeLink?.setInterruptAiWake(false) }
         runCatching { activeLink?.clearCommunicationDevice() }
         activeLink = null
         RelayBridge.recordVoiceIdle("reviewing")
@@ -493,6 +499,7 @@ object VoiceController {
         activeRealtimeSession = null
         activeCapture?.stop()
         activeCapture = null
+        runCatching { activeLink?.setInterruptAiWake(false) }
         runCatching { activeLink?.clearCommunicationDevice() }
         activeLink = null
         activeNotificationId = ""

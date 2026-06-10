@@ -13,7 +13,10 @@ class RelayAutostartReceiver : BroadcastReceiver() {
             Intent.ACTION_BOOT_COMPLETED,
             Intent.ACTION_MY_PACKAGE_REPLACED,
             BluetoothDevice.ACTION_ACL_CONNECTED,
-            -> RelayStarter.startIfReady(context, action.substringAfterLast('.'))
+            -> {
+                CompanionDeviceCoordinator.startObserving(context)
+                RelayStarter.startIfReady(context, action.substringAfterLast('.'))
+            }
 
             BluetoothAdapter.ACTION_STATE_CHANGED -> {
                 if (

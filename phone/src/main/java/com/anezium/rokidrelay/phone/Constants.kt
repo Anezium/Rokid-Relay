@@ -2,6 +2,7 @@ package com.anezium.rokidrelay.phone
 
 object Constants {
     const val AUTH_REQUEST_CODE = 7201
+    const val COMPANION_REQUEST_CODE = 7204
     const val CLIENT_PACKAGE = "com.anezium.rokidrelay.glasses"
     const val CLIENT_MAIN_ACTIVITY = "com.anezium.rokidrelay.glasses.MainActivity"
     const val CLIENT_ASSET_NAME = "rokid-relay-glasses.apk"

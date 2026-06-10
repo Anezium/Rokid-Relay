@@ -143,11 +143,12 @@ Do not publish local APKs built with private credentials, local tokens, or debug
 3. Make sure Global Hi Rokid is installed and the glasses are connected to it.
 4. In the phone app, tap `Authorize` on the `Hi Rokid` row and approve the Hi Rokid authorization screen.
 5. Tap `Open` on the `Notification access` row and enable Rokid Relay in Android notification listener settings.
-6. Choose a speech engine in the `Speech` panel.
-7. If you choose `API`, pick `OpenAI` or `ElevenLabs`, pick a model, then use `Manage API keys`.
-8. Open the glasses helper once. If no notification is showing, tap on the glasses screen to open Accessibility settings.
-9. Enable `Rokid Relay overlay` in Accessibility on the glasses.
-10. Return to the glasses app. The setup screen should show `ACCESSIBILITY ON`.
+6. Tap `Link` on the `Companion link` row and pick the glasses in the Android companion-device dialog. This registers the glasses with Android's Companion Device Manager, which is what allows the microphone foreground service to start while the phone app is in the background (required for voice replies with the `Android CXR` engine after a reboot or background restart).
+7. Choose a speech engine in the `Speech` panel.
+8. If you choose `API`, pick `OpenAI` or `ElevenLabs`, pick a model, then use `Manage API keys`.
+9. Open the glasses helper once. If no notification is showing, tap on the glasses screen to open Accessibility settings.
+10. Enable `Rokid Relay overlay` in Accessibility on the glasses.
+11. Return to the glasses app. The setup screen should show `ACCESSIBILITY ON`.
 
 After the phone has a saved Hi Rokid token, notification access, and a ready STT engine, the relay starts automatically when the app opens and on supported Android events such as boot, app update, Bluetooth reconnect, and notification-listener connection.
 
@@ -174,6 +175,8 @@ Rokid Relay has two speech modes.
 ### Android
 
 `Android CXR` uses Android speech recognition with the glasses CXR audio stream. It does not require an API key, but it does require microphone permission and a microphone foreground-service type while capture is active.
+
+On Android 14+, the microphone foreground-service type cannot be acquired while the app is in the background (for example after a reboot or when the relay service is restarted by the system). Linking the glasses through the `Companion link` setup row registers them with Android's Companion Device Manager, which lifts this restriction whenever the glasses are in range.
 
 ### API
 
