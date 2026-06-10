@@ -40,6 +40,7 @@ class MainActivity : Activity() {
     private val modeButtons = mutableMapOf<SpeechMode, Button>()
     private val providerButtons = mutableMapOf<SpeechToTextProvider, Button>()
     private val modelOptionRows = mutableMapOf<SpeechToTextEngine, SttModelOptionRow>()
+    private val languageButtons = mutableMapOf<TranscriptionLanguage, Button>()
 
     private lateinit var updateManager: GitHubUpdateManager
     private lateinit var setupRows: LinearLayout
@@ -72,6 +73,11 @@ class MainActivity : Activity() {
     private lateinit var elevenLabsKeyInput: EditText
     private lateinit var openAiKeyMeta: TextView
     private lateinit var elevenLabsKeyMeta: TextView
+    private lateinit var azureKeyBlock: LinearLayout
+    private lateinit var azureKeyInput: EditText
+    private lateinit var azureRegionInput: EditText
+    private lateinit var azureKeyMeta: TextView
+    private lateinit var languageHint: TextView
     private lateinit var diagnosticsPanel: DiagnosticsPanel
     private lateinit var homePage: ScrollView
     private lateinit var notificationsPage: ScrollView
@@ -315,6 +321,11 @@ class MainActivity : Activity() {
                 addView(modelButtonsContainer, matchWrap(top = 8))
             }
             addView(modelChoiceContainer, matchWrap())
+
+            addView(label("Language"), matchWrap(top = 14))
+            addView(languageSelector(), matchWrap(top = 8))
+            languageHint = bodyText()
+            addView(languageHint, matchWrap(top = 8))
         })
 
         addView(panel("API Keys") {
@@ -342,8 +353,10 @@ class MainActivity : Activity() {
                 setInput = { elevenLabsKeyInput = it },
                 setMeta = { elevenLabsKeyMeta = it },
             )
+            azureKeyBlock = buildAzureKeyBlock()
             apiKeysContainer.addView(openAiKeyBlock, matchWrap(top = 12))
             apiKeysContainer.addView(elevenLabsKeyBlock, matchWrap(top = 12))
+            apiKeysContainer.addView(azureKeyBlock, matchWrap(top = 12))
             addView(apiKeysContainer, matchWrap())
         })
     }
@@ -616,7 +629,11 @@ class MainActivity : Activity() {
         LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             providerButtons.clear()
-            listOf(SpeechToTextProvider.OPENAI, SpeechToTextProvider.ELEVENLABS).forEachIndexed { index, provider ->
+            listOf(
+                SpeechToTextProvider.OPENAI,
+                SpeechToTextProvider.ELEVENLABS,
+                SpeechToTextProvider.AZURE,
+            ).forEachIndexed { index, provider ->
                 val button = selectorButton(provider.displayName) {
                     val next = defaultEngineForProvider(provider)
                     val store = SpeechToTextSettingsStore(this@MainActivity)
@@ -704,6 +721,7 @@ class MainActivity : Activity() {
             val provider = when (kind) {
                 SpeechToTextCredentialKind.OPENAI -> "OpenAI"
                 SpeechToTextCredentialKind.ELEVENLABS -> "ElevenLabs"
+                SpeechToTextCredentialKind.AZURE -> "Azure"
                 SpeechToTextCredentialKind.NONE -> "STT"
             }
             addView(buttonRow(
@@ -730,6 +748,109 @@ class MainActivity : Activity() {
                 },
             ), matchWrap(top = 8))
         }
+
+    private fun buildAzureKeyBlock(): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(label("Azure Speech API key"), LinearLayout.LayoutParams(0, wrap(), 1f))
+                azureKeyMeta = TextView(this@MainActivity).apply {
+                    textSize = 12f
+                    includeFontPadding = false
+                    setTextColor(COLOR_MUTED)
+                    gravity = Gravity.END
+                }
+                addView(azureKeyMeta, LinearLayout.LayoutParams(0, wrap(), 1f))
+            }, matchWrap())
+
+            azureKeyInput = keyInput("Speech resource key")
+            setApiKeyInputMode(azureKeyInput)
+            addView(azureKeyInput, LinearLayout.LayoutParams(match(), dp(42)).apply {
+                topMargin = dp(8)
+            })
+
+            addView(label("Azure region"), matchWrap(top = 12))
+            azureRegionInput = keyInput("eastasia, westeurope, eastus...")
+            addView(azureRegionInput, LinearLayout.LayoutParams(match(), dp(42)).apply {
+                topMargin = dp(8)
+            })
+
+            addView(buttonRow(
+                smallButton("Save", ButtonTone.Primary) {
+                    val store = SttCredentialStore(this@MainActivity)
+                    val key = azureKeyInput.text.toString().trim()
+                    val region = azureRegionInput.text.toString().trim()
+                    val notice = runCatching {
+                        if (key.isNotBlank()) store.saveApiKey(SpeechToTextCredentialKind.AZURE, key)
+                        if (region.isNotBlank()) store.saveAzureRegion(region)
+                        require(!store.apiKey(SpeechToTextCredentialKind.AZURE).isNullOrBlank()) { "API key is required" }
+                        require(!store.azureRegion().isNullOrBlank()) { "Region is required (e.g. eastasia)" }
+                    }.fold(
+                        onSuccess = {
+                            azureKeyInput.text.clear()
+                            "Azure Speech key saved"
+                        },
+                        onFailure = {
+                            "Failed to save Azure key: ${it.message}"
+                        },
+                    )
+                    renderStatus()
+                    toastLine(notice)
+                },
+                smallButton("Clear", ButtonTone.Secondary) {
+                    val store = SttCredentialStore(this@MainActivity)
+                    store.clearApiKey(SpeechToTextCredentialKind.AZURE)
+                    store.clearAzureRegion()
+                    azureKeyInput.text.clear()
+                    azureRegionInput.text.clear()
+                    renderStatus()
+                    toastLine("Azure Speech key cleared")
+                },
+            ), matchWrap(top = 8))
+        }
+
+    private fun languageSelector(): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            languageButtons.clear()
+            TranscriptionLanguage.values().toList().chunked(LANGUAGE_GRID_COLUMNS).forEachIndexed { rowIndex, rowLanguages ->
+                addView(LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    rowLanguages.forEachIndexed { index, language ->
+                        val button = selectorButton(language.label) {
+                            val store = SpeechToTextSettingsStore(this@MainActivity)
+                            if (store.selectedLanguage() != language) {
+                                store.saveSelectedLanguage(language)
+                                renderStatus()
+                            }
+                        }
+                        button.gravity = Gravity.CENTER
+                        button.setPadding(dp(4), 0, dp(4), 0)
+                        languageButtons[language] = button
+                        addView(button, LinearLayout.LayoutParams(0, dp(40), 1f).apply {
+                            if (index > 0) leftMargin = dp(8)
+                        })
+                    }
+                    repeat(LANGUAGE_GRID_COLUMNS - rowLanguages.size) {
+                        addView(View(this@MainActivity), LinearLayout.LayoutParams(0, dp(40), 1f).apply {
+                            leftMargin = dp(8)
+                        })
+                    }
+                }, matchWrap(top = if (rowIndex == 0) 0 else 8))
+            }
+        }
+
+    private fun updateLanguageButtons(selected: TranscriptionLanguage) {
+        languageButtons.forEach { (language, button) ->
+            styleChoiceButton(button, language == selected)
+        }
+        if (::languageHint.isInitialized) {
+            languageHint.text = selected.uiNote
+                ?: "${selected.summaryName} is forced for voice replies on every engine."
+        }
+    }
 
     private fun buttonRow(vararg buttons: Button): LinearLayout =
         LinearLayout(this).apply {
@@ -846,9 +967,12 @@ class MainActivity : Activity() {
         val authSaved = !savedToken().isNullOrBlank()
         val batteryUnrestricted = batteryOptimizationsIgnored()
         val selectedEngine = SpeechToTextSettingsStore(this).selectedEngine()
+        val selectedLanguage = SpeechToTextSettingsStore(this).selectedLanguage()
         val stt = SttCredentialStore(this)
         val openAiLabel = stt.accountLabel(SpeechToTextCredentialKind.OPENAI)
         val elevenLabsLabel = stt.accountLabel(SpeechToTextCredentialKind.ELEVENLABS)
+        val azureLabel = stt.accountLabel(SpeechToTextCredentialKind.AZURE)
+        val azureRegion = stt.azureRegion()
         val sttReady = sttReady(selectedEngine, stt)
         val micPermissionGranted = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         val companionLinked = CompanionDeviceCoordinator.hasAssociation(this)
@@ -942,6 +1066,12 @@ class MainActivity : Activity() {
                     "${selectedEngine.displayName}. Add an OpenAI key."
                 selectedEngine.credentialKind == SpeechToTextCredentialKind.ELEVENLABS && elevenLabsLabel.isNullOrBlank() ->
                     "${selectedEngine.displayName}. Add an ElevenLabs key."
+                selectedEngine.credentialKind == SpeechToTextCredentialKind.AZURE && azureLabel.isNullOrBlank() ->
+                    "${selectedEngine.displayName}. Add an Azure Speech key."
+                selectedEngine.credentialKind == SpeechToTextCredentialKind.AZURE && azureRegion.isNullOrBlank() ->
+                    "${selectedEngine.displayName}. Set the Azure region."
+                selectedEngine.credentialKind == SpeechToTextCredentialKind.AZURE ->
+                    "${selectedEngine.displayName}. Buffered glasses audio, transcribed after you stop speaking (not realtime)."
                 selectedEngine.requiresMicrophonePermission ->
                     "${selectedEngine.displayName}. Uses glasses PCM through Android recognition."
                 selectedEngine.usesRealtime ->
@@ -1036,7 +1166,8 @@ class MainActivity : Activity() {
         }
 
         updateSpeechChoiceButtons(selectedEngine)
-        updateApiKeys(selectedEngine, openAiLabel, elevenLabsLabel)
+        updateLanguageButtons(selectedLanguage)
+        updateApiKeys(selectedEngine, openAiLabel, elevenLabsLabel, azureLabel, azureRegion)
 
         if (::diagnosticsPanel.isInitialized) {
             diagnosticsPanel.render(snap)
@@ -1315,12 +1446,16 @@ class MainActivity : Activity() {
         selectedEngine: SpeechToTextEngine,
         openAiLabel: String?,
         elevenLabsLabel: String?,
+        azureLabel: String?,
+        azureRegion: String?,
     ) {
         val selectedOpenAi = selectedEngine.credentialKind == SpeechToTextCredentialKind.OPENAI
         val selectedElevenLabs = selectedEngine.credentialKind == SpeechToTextCredentialKind.ELEVENLABS
-        val apiSelected = selectedOpenAi || selectedElevenLabs
+        val selectedAzure = selectedEngine.credentialKind == SpeechToTextCredentialKind.AZURE
+        val apiSelected = selectedOpenAi || selectedElevenLabs || selectedAzure
         val forceOpen = (selectedOpenAi && openAiLabel.isNullOrBlank()) ||
-            (selectedElevenLabs && elevenLabsLabel.isNullOrBlank())
+            (selectedElevenLabs && elevenLabsLabel.isNullOrBlank()) ||
+            (selectedAzure && (azureLabel.isNullOrBlank() || azureRegion.isNullOrBlank()))
         val showKeys = apiKeysVisible || forceOpen
 
         apiKeysToggleButton.visibility = if (apiSelected) View.VISIBLE else View.GONE
@@ -1329,11 +1464,19 @@ class MainActivity : Activity() {
 
         openAiKeyBlock.visibility = if (apiKeysVisible || selectedOpenAi) View.VISIBLE else View.GONE
         elevenLabsKeyBlock.visibility = if (apiKeysVisible || selectedElevenLabs) View.VISIBLE else View.GONE
+        azureKeyBlock.visibility = if (apiKeysVisible || selectedAzure) View.VISIBLE else View.GONE
 
         openAiKeyMeta.text = openAiLabel ?: "not saved"
         openAiKeyMeta.setTextColor(if (openAiLabel.isNullOrBlank()) COLOR_MUTED else COLOR_PHOSPHOR)
         elevenLabsKeyMeta.text = elevenLabsLabel ?: "not saved"
         elevenLabsKeyMeta.setTextColor(if (elevenLabsLabel.isNullOrBlank()) COLOR_MUTED else COLOR_PHOSPHOR)
+        val azureReady = !azureLabel.isNullOrBlank() && !azureRegion.isNullOrBlank()
+        azureKeyMeta.text = when {
+            azureLabel.isNullOrBlank() -> "not saved"
+            azureRegion.isNullOrBlank() -> "$azureLabel · region missing"
+            else -> "$azureLabel · $azureRegion"
+        }
+        azureKeyMeta.setTextColor(if (azureReady) COLOR_PHOSPHOR else COLOR_MUTED)
     }
 
     private fun notificationDurationEditor(): LinearLayout =
@@ -1640,17 +1783,23 @@ class MainActivity : Activity() {
         )
     }
 
-    private fun defaultApiEngine(): SpeechToTextEngine =
-        if (!SttCredentialStore(this).apiKey(SpeechToTextCredentialKind.ELEVENLABS).isNullOrBlank()) {
-            SpeechToTextEngine.ELEVENLABS_SCRIBE_V2_REALTIME
-        } else {
-            SpeechToTextEngine.OPENAI_GPT_REALTIME_WHISPER
+    private fun defaultApiEngine(): SpeechToTextEngine {
+        val store = SttCredentialStore(this)
+        return when {
+            !store.apiKey(SpeechToTextCredentialKind.ELEVENLABS).isNullOrBlank() ->
+                SpeechToTextEngine.ELEVENLABS_SCRIBE_V2_REALTIME
+            store.hasOpenAiApiKey() -> SpeechToTextEngine.OPENAI_GPT_REALTIME_WHISPER
+            !store.apiKey(SpeechToTextCredentialKind.AZURE).isNullOrBlank() ->
+                SpeechToTextEngine.AZURE_SPEECH
+            else -> SpeechToTextEngine.OPENAI_GPT_REALTIME_WHISPER
         }
+    }
 
     private fun defaultEngineForProvider(provider: SpeechToTextProvider): SpeechToTextEngine =
         when (provider) {
             SpeechToTextProvider.OPENAI -> SpeechToTextEngine.OPENAI_GPT_REALTIME_WHISPER
             SpeechToTextProvider.ELEVENLABS -> SpeechToTextEngine.ELEVENLABS_SCRIBE_V2_REALTIME
+            SpeechToTextProvider.AZURE -> SpeechToTextEngine.AZURE_SPEECH
             SpeechToTextProvider.ANDROID -> SpeechToTextEngine.ANDROID_CXR
         }
 
@@ -1662,6 +1811,7 @@ class MainActivity : Activity() {
         when (provider) {
             SpeechToTextProvider.OPENAI -> "OpenAI: strong all-purpose recognition. Good if you already use an OpenAI key."
             SpeechToTextProvider.ELEVENLABS -> "ElevenLabs: voice-focused recognition with simple realtime and buffered choices."
+            SpeechToTextProvider.AZURE -> "Azure: free 5 h/month tier with wide language coverage. Buffered only — no realtime, text appears after you stop speaking."
             SpeechToTextProvider.ANDROID -> "Android: local phone recognition. No API key, but needs microphone permission."
         }
 
@@ -1808,6 +1958,8 @@ class MainActivity : Activity() {
         when {
             engine.requiresMicrophonePermission ->
                 checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+            engine.credentialKind == SpeechToTextCredentialKind.AZURE ->
+                store.hasCredential(engine) && !store.azureRegion().isNullOrBlank()
             engine.requiresCredential -> store.hasCredential(engine)
             else -> true
         }
@@ -1899,6 +2051,7 @@ class MainActivity : Activity() {
 
     private companion object {
         private const val FOREGROUND_REFRESH_DELAY_MS = 250L
+        private const val LANGUAGE_GRID_COLUMNS = 3
         val COLOR_APP_BG: Int = Color.rgb(4, 10, 6)
         val COLOR_PANEL: Int = Color.rgb(8, 18, 11)
         val COLOR_PANEL_ALT: Int = Color.rgb(11, 29, 16)

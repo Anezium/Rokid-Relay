@@ -40,10 +40,18 @@ object VoiceController {
                 return@post
             }
             val appContext = context.applicationContext
-            val selectedEngine = SpeechToTextSettingsStore(appContext).selectedEngine()
+            val settings = SpeechToTextSettingsStore(appContext)
+            val selectedEngine = settings.selectedEngine()
+            val selectedLanguage = settings.selectedLanguage()
             val credentials = SttCredentialStore(appContext)
             if (selectedEngine.requiresCredential && !credentials.hasCredential(selectedEngine)) {
                 RelayBridge.sendReplyResult(notificationId, false, "${selectedEngine.provider.displayName} STT key missing")
+                return@post
+            }
+            if (selectedEngine.credentialKind == SpeechToTextCredentialKind.AZURE &&
+                credentials.azureRegion().isNullOrBlank()
+            ) {
+                RelayBridge.sendReplyResult(notificationId, false, "Azure Speech region missing")
                 return@post
             }
 
@@ -86,12 +94,12 @@ object VoiceController {
             )
 
             if (selectedEngine == SpeechToTextEngine.ANDROID_CXR) {
-                startAndroidCxrRecognizer(appContext, link, notificationId)
+                startAndroidCxrRecognizer(appContext, link, notificationId, selectedLanguage)
                 return@post
             }
 
             if (selectedEngine.usesRealtime) {
-                startRealtimeCxrTranscription(appContext, link, notificationId, selectedEngine)
+                startRealtimeCxrTranscription(appContext, link, notificationId, selectedEngine, selectedLanguage)
                 return@post
             }
 
@@ -104,7 +112,7 @@ object VoiceController {
                 onCaptureFinished = { audio ->
                     if (voiceActive && activeCapture === capture) {
                         RelayBridge.sendVoiceState("processing")
-                        transcribeCapturedAudio(appContext, selectedEngine, audio)
+                        transcribeCapturedAudio(appContext, selectedEngine, selectedLanguage, audio)
                     }
                 },
                 onAudioLevel = { snapshot ->
@@ -122,12 +130,17 @@ object VoiceController {
         }
     }
 
-    private fun startAndroidCxrRecognizer(context: Context, link: CXRLink, notificationId: String) {
+    private fun startAndroidCxrRecognizer(
+        context: Context,
+        link: CXRLink,
+        notificationId: String,
+        language: TranscriptionLanguage,
+    ) {
         var recognizerRef: AndroidCxrSpeechRecognizer? = null
         val recognizer = AndroidCxrSpeechRecognizer(
             context = context,
             link = link,
-            languageTag = Locale.getDefault().toLanguageTag(),
+            languageTag = language.androidTag ?: Locale.getDefault().toLanguageTag(),
             listener = object : AndroidCxrSpeechRecognizer.Listener {
                 override fun onListening() {
                     if (voiceActive && activeRecognizer === recognizerRef && activeNotificationId == notificationId) {
@@ -172,6 +185,7 @@ object VoiceController {
         link: CXRLink,
         notificationId: String,
         selectedEngine: SpeechToTextEngine,
+        selectedLanguage: TranscriptionLanguage,
     ) {
         var realtimeText = ""
         var localSession: RealtimeSpeechToTextSession? = null
@@ -180,7 +194,8 @@ object VoiceController {
             ApiRealtimeSpeechToText.create(
                 SttCredentialStore(context),
                 selectedEngine,
-                object : RealtimeSpeechToTextListener {
+                forcedLanguage = selectedLanguage,
+                listener = object : RealtimeSpeechToTextListener {
                     override fun onReady() {
                         main.post {
                             val sessionRef = localSession
@@ -310,7 +325,12 @@ object VoiceController {
         beginReviewCountdown(id, spoken)
     }
 
-    private fun transcribeCapturedAudio(context: Context, selectedEngine: SpeechToTextEngine, audio: CxrCapturedAudio) {
+    private fun transcribeCapturedAudio(
+        context: Context,
+        selectedEngine: SpeechToTextEngine,
+        selectedLanguage: TranscriptionLanguage,
+        audio: CxrCapturedAudio,
+    ) {
         val speechEngine = ApiCompletedAudioSpeechToTextEngine(SttCredentialStore(context), selectedEngine)
         activeEngine = speechEngine
         val notificationId = activeNotificationId
@@ -321,6 +341,7 @@ object VoiceController {
                         pcm16Mono = audio.pcm16Mono,
                         sampleRate = audio.sampleRate,
                         languageTag = Locale.getDefault().toLanguageTag(),
+                        language = selectedLanguage,
                     ),
                 )
             }

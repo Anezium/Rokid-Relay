@@ -32,6 +32,7 @@ object ApiRealtimeSpeechToText {
         credentialStore: SttCredentialStore,
         engine: SpeechToTextEngine,
         listener: RealtimeSpeechToTextListener,
+        forcedLanguage: TranscriptionLanguage = TranscriptionLanguage.AUTO,
     ): RealtimeSpeechToTextSession {
         require(engine.usesRealtime) { "${engine.displayName} is not a realtime STT engine" }
         val model = engine.realtimeModelId ?: error("${engine.displayName} has no realtime model id")
@@ -40,13 +41,17 @@ object ApiRealtimeSpeechToText {
                 apiKey = credentialStore.apiKey(SpeechToTextCredentialKind.OPENAI)?.trim().orEmpty(),
                 model = model,
                 listener = listener,
+                forcedLanguage = forcedLanguage,
             )
             SpeechToTextProvider.ELEVENLABS -> ElevenLabsRealtimeSpeechToTextSession(
                 apiKey = credentialStore.apiKey(SpeechToTextCredentialKind.ELEVENLABS)?.trim().orEmpty(),
                 model = model,
                 listener = listener,
+                forcedLanguage = forcedLanguage,
             )
-            SpeechToTextProvider.ANDROID -> error("${engine.displayName} is not an API realtime STT engine")
+            SpeechToTextProvider.AZURE,
+            SpeechToTextProvider.ANDROID,
+            -> error("${engine.displayName} is not an API realtime STT engine")
         }
     }
 }
@@ -55,6 +60,7 @@ private class OpenAiRealtimeSpeechToTextSession(
     private val apiKey: String,
     private val model: String,
     private val listener: RealtimeSpeechToTextListener,
+    private val forcedLanguage: TranscriptionLanguage,
 ) : WebSocketListener(), RealtimeSpeechToTextSession {
     private val client = realtimeHttpClient()
     private val chunker = PcmChunker(INPUT_CHUNK_BYTES) { chunk ->
@@ -73,7 +79,7 @@ private class OpenAiRealtimeSpeechToTextSession(
             listener.onError("OpenAI realtime expects 16 kHz CXR PCM input")
             return
         }
-        language = languageCode(languageTag)
+        language = forcedLanguage.openAiCode ?: languageCode(languageTag)
         val request = Request.Builder()
             .url("$OPENAI_REALTIME_URL?intent=transcription")
             .addHeader("Authorization", "Bearer $apiKey")
@@ -123,7 +129,7 @@ private class OpenAiRealtimeSpeechToTextSession(
     private fun sendSessionUpdate(webSocket: WebSocket) {
         if (sessionUpdateSent || closed) return
         sessionUpdateSent = true
-        webSocket.send(openAiSessionUpdate(model, language).toString())
+        webSocket.send(openAiSessionUpdate(model, language, forcedLanguage.openAiPrompt).toString())
     }
 
     private fun emitReady() {
@@ -165,6 +171,7 @@ private class ElevenLabsRealtimeSpeechToTextSession(
     private val apiKey: String,
     private val model: String,
     private val listener: RealtimeSpeechToTextListener,
+    private val forcedLanguage: TranscriptionLanguage,
 ) : WebSocketListener(), RealtimeSpeechToTextSession {
     private val client = realtimeHttpClient()
     private val chunker = PcmChunker(CHUNK_BYTES) { chunk -> sendChunk(chunk, commit = false) }
@@ -179,7 +186,7 @@ private class ElevenLabsRealtimeSpeechToTextSession(
             listener.onError("ElevenLabs realtime expects 16 kHz CXR PCM input")
             return
         }
-        val language = languageCode(languageTag)
+        val language = forcedLanguage.elevenLabsCode ?: languageCode(languageTag)
         val request = Request.Builder()
             .url(elevenLabsRealtimeUrl(model, language))
             .addHeader("xi-api-key", apiKey)
@@ -348,11 +355,12 @@ private object Pcm16Resampler {
     }
 }
 
-private fun openAiSessionUpdate(model: String, language: String?): JSONObject {
+private fun openAiSessionUpdate(model: String, language: String?, prompt: String? = null): JSONObject {
     val transcription = JSONObject()
         .put("model", model)
         .put("delay", "low")
     if (!language.isNullOrBlank()) transcription.put("language", language)
+    if (!prompt.isNullOrBlank()) transcription.put("prompt", prompt)
     return JSONObject()
         .put("type", "session.update")
         .put(

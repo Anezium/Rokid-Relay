@@ -20,6 +20,7 @@ data class CompletedAudioSpeechToTextInput(
     val pcm16Mono: ByteArray,
     val sampleRate: Int,
     val languageTag: String,
+    val language: TranscriptionLanguage = TranscriptionLanguage.AUTO,
 )
 
 interface CompletedAudioSpeechToTextEngine {
@@ -39,8 +40,9 @@ class ApiCompletedAudioSpeechToTextEngine(
         val model = engine.completedAudioModelId ?: error("${engine.displayName} has no model id")
         val wav = Pcm16Wav.encode(input.pcm16Mono, input.sampleRate)
         return when (engine.provider) {
-            SpeechToTextProvider.OPENAI -> transcribeOpenAi(model, wav)
-            SpeechToTextProvider.ELEVENLABS -> transcribeElevenLabs(model, wav)
+            SpeechToTextProvider.OPENAI -> transcribeOpenAi(model, wav, input.language)
+            SpeechToTextProvider.ELEVENLABS -> transcribeElevenLabs(model, wav, input.language)
+            SpeechToTextProvider.AZURE -> transcribeAzure(wav, input.language, input.languageTag)
             SpeechToTextProvider.ANDROID -> error("${engine.displayName} is not an API STT engine")
         }
     }
@@ -50,7 +52,7 @@ class ApiCompletedAudioSpeechToTextEngine(
         activeConnection = null
     }
 
-    private fun transcribeOpenAi(model: String, wav: ByteArray): String {
+    private fun transcribeOpenAi(model: String, wav: ByteArray, language: TranscriptionLanguage): String {
         val apiKey = credentialStore.apiKey(SpeechToTextCredentialKind.OPENAI)?.trim().orEmpty()
         require(apiKey.isNotBlank()) { "OpenAI STT key missing" }
         val connection = (URL(OPENAI_TRANSCRIPTIONS_URL).openConnection() as HttpURLConnection).apply {
@@ -66,10 +68,13 @@ class ApiCompletedAudioSpeechToTextEngine(
             connection.useMultipart("OpenAI STT") { boundary ->
                 writeField(boundary, "model", model)
                 writeField(boundary, "response_format", "json")
+                language.openAiCode?.let { writeField(boundary, "language", it) }
+                val basePrompt =
+                    "Transcribe a short voice reply captured from Rokid smart glasses. Preserve the spoken language."
                 writeField(
                     boundary,
                     "prompt",
-                    "Transcribe a short voice reply captured from Rokid smart glasses. Preserve the spoken language.",
+                    language.openAiPrompt?.let { "$basePrompt $it" } ?: basePrompt,
                 )
                 writeFile(
                     boundary = boundary,
@@ -84,7 +89,7 @@ class ApiCompletedAudioSpeechToTextEngine(
         }
     }
 
-    private fun transcribeElevenLabs(model: String, wav: ByteArray): String {
+    private fun transcribeElevenLabs(model: String, wav: ByteArray, language: TranscriptionLanguage): String {
         val apiKey = credentialStore.apiKey(SpeechToTextCredentialKind.ELEVENLABS)?.trim().orEmpty()
         require(apiKey.isNotBlank()) { "ElevenLabs STT key missing" }
         val connection = (URL(ELEVENLABS_SPEECH_TO_TEXT_URL).openConnection() as HttpURLConnection).apply {
@@ -99,6 +104,7 @@ class ApiCompletedAudioSpeechToTextEngine(
         return try {
             connection.useMultipart("ElevenLabs STT") { boundary ->
                 writeField(boundary, "model_id", model)
+                language.elevenLabsCode?.let { writeField(boundary, "language_code", it) }
                 writeFile(
                     boundary = boundary,
                     name = "file",
@@ -110,6 +116,64 @@ class ApiCompletedAudioSpeechToTextEngine(
         } finally {
             activeConnection = null
         }
+    }
+
+    private fun transcribeAzure(wav: ByteArray, language: TranscriptionLanguage, languageTag: String): String {
+        val apiKey = credentialStore.apiKey(SpeechToTextCredentialKind.AZURE)?.trim().orEmpty()
+        require(apiKey.isNotBlank()) { "Azure Speech key missing" }
+        val region = credentialStore.azureRegion()?.trim().orEmpty()
+        require(region.isNotBlank()) { "Azure Speech region missing" }
+        val locale = language.azureLocale ?: azureLocaleFromTag(languageTag)
+        val url = "https://$region.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1" +
+            "?language=$locale&format=simple"
+        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = CONNECT_TIMEOUT_MS
+            readTimeout = READ_TIMEOUT_MS
+            doOutput = true
+            setRequestProperty("Ocp-Apim-Subscription-Key", apiKey)
+            setRequestProperty("Content-Type", "audio/wav; codecs=audio/pcm; samplerate=16000")
+            setRequestProperty("Accept", "application/json")
+        }
+        activeConnection = connection
+        return try {
+            connection.outputStream.buffered().use { it.write(wav) }
+            val status = connection.responseCode
+            val body = runCatching {
+                (if (status in 200..299) connection.inputStream else connection.errorStream ?: connection.inputStream)
+                    .bufferedReader(Charsets.UTF_8)
+                    .use { it.readText() }
+            }.getOrDefault("")
+            if (status !in 200..299) {
+                error("Azure STT failed ($status): ${body.take(420).ifBlank { "no error body" }}")
+            }
+            val json = runCatching { JSONObject(body) }.getOrElse { error("Azure STT returned an invalid response") }
+            when (val recognitionStatus = json.optString("RecognitionStatus")) {
+                "Success" -> json.optString("DisplayText").trim().ifBlank { error("Azure STT returned no transcript") }
+                "NoMatch" -> error("No speech recognized")
+                else -> error("Azure STT failed: ${recognitionStatus.ifBlank { "unknown status" }}")
+            }
+        } finally {
+            connection.disconnect()
+            activeConnection = null
+        }
+    }
+
+    private fun azureLocaleFromTag(languageTag: String): String {
+        val locale = java.util.Locale.forLanguageTag(languageTag)
+        val language = locale.language.lowercase(java.util.Locale.US)
+        if (language.isBlank()) return DEFAULT_AZURE_LOCALE
+        if (language == "yue") return "zh-HK"
+        if (language == "zh") {
+            return when {
+                locale.country.equals("HK", ignoreCase = true) -> "zh-HK"
+                locale.script.equals("Hant", ignoreCase = true) ||
+                    locale.country.equals("TW", ignoreCase = true) -> "zh-TW"
+                else -> "zh-CN"
+            }
+        }
+        if (locale.country.isNotBlank()) return "$language-${locale.country.uppercase(java.util.Locale.US)}"
+        return COMMON_AZURE_LOCALES[language] ?: DEFAULT_AZURE_LOCALE
     }
 
     private fun String.extractTranscript(): String {
@@ -186,6 +250,19 @@ class ApiCompletedAudioSpeechToTextEngine(
         const val CONNECT_TIMEOUT_MS = 20_000
         const val READ_TIMEOUT_MS = 120_000
         const val MIN_AUDIO_BYTES = 3_200
+        const val DEFAULT_AZURE_LOCALE = "en-US"
+        val COMMON_AZURE_LOCALES = mapOf(
+            "en" to "en-US",
+            "fr" to "fr-FR",
+            "de" to "de-DE",
+            "es" to "es-ES",
+            "it" to "it-IT",
+            "pt" to "pt-BR",
+            "ja" to "ja-JP",
+            "ko" to "ko-KR",
+            "nl" to "nl-NL",
+            "ru" to "ru-RU",
+        )
     }
 }
 
@@ -242,6 +319,18 @@ class SttCredentialStore(context: Context) {
     }
 
     fun clearOpenAiApiKey() = clearApiKey(SpeechToTextCredentialKind.OPENAI)
+
+    fun azureRegion(): String? =
+        prefs.getString(Constants.PREF_STT_AZURE_REGION, null)?.trim()?.takeIf { it.isNotBlank() }
+
+    fun saveAzureRegion(region: String) {
+        val clean = region.trim().lowercase(java.util.Locale.US)
+        prefs.edit().putString(Constants.PREF_STT_AZURE_REGION, clean.ifBlank { null }).apply()
+    }
+
+    fun clearAzureRegion() {
+        prefs.edit().remove(Constants.PREF_STT_AZURE_REGION).apply()
+    }
 }
 
 private fun SpeechToTextCredentialKind.keyPreferenceName(): String? =
@@ -249,6 +338,7 @@ private fun SpeechToTextCredentialKind.keyPreferenceName(): String? =
         SpeechToTextCredentialKind.NONE -> null
         SpeechToTextCredentialKind.OPENAI -> Constants.PREF_STT_OPENAI_KEY
         SpeechToTextCredentialKind.ELEVENLABS -> Constants.PREF_STT_ELEVENLABS_KEY
+        SpeechToTextCredentialKind.AZURE -> Constants.PREF_STT_AZURE_KEY
     }
 
 private fun SpeechToTextCredentialKind.labelPreferenceName(): String? =
@@ -256,6 +346,7 @@ private fun SpeechToTextCredentialKind.labelPreferenceName(): String? =
         SpeechToTextCredentialKind.NONE -> null
         SpeechToTextCredentialKind.OPENAI -> Constants.PREF_STT_OPENAI_LABEL
         SpeechToTextCredentialKind.ELEVENLABS -> Constants.PREF_STT_ELEVENLABS_LABEL
+        SpeechToTextCredentialKind.AZURE -> Constants.PREF_STT_AZURE_LABEL
     }
 
 private object Pcm16Wav {

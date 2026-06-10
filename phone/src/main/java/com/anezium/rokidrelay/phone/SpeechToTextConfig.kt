@@ -8,12 +8,14 @@ enum class SpeechToTextProvider(
     ANDROID("Android"),
     OPENAI("OpenAI"),
     ELEVENLABS("ElevenLabs"),
+    AZURE("Azure"),
 }
 
 enum class SpeechToTextCredentialKind {
     NONE,
     OPENAI,
     ELEVENLABS,
+    AZURE,
 }
 
 enum class SpeechToTextEngine(
@@ -97,6 +99,16 @@ enum class SpeechToTextEngine(
         choiceBadges = listOf("Buffered", "Legacy", "Cloud audio"),
         credentialKind = SpeechToTextCredentialKind.ELEVENLABS,
         completedAudioModelId = "scribe_v1",
+    ),
+    AZURE_SPEECH(
+        id = "azure_speech",
+        provider = SpeechToTextProvider.AZURE,
+        displayName = "Azure Speech to Text",
+        shortLabel = "Azure STT",
+        choiceDescription = "Transcribes after you finish speaking — not realtime, no live text.",
+        choiceBadges = listOf("Buffered", "Free 5 h/mo", "Cloud audio"),
+        credentialKind = SpeechToTextCredentialKind.AZURE,
+        completedAudioModelId = "azure-conversation",
     );
 
     val usesCompletedAudio: Boolean
@@ -132,6 +144,8 @@ class SpeechToTextSettingsStore(context: Context) {
             SpeechToTextEngine.OPENAI_GPT_REALTIME_WHISPER
         } else if (!credentials.apiKey(SpeechToTextCredentialKind.ELEVENLABS).isNullOrBlank()) {
             SpeechToTextEngine.ELEVENLABS_SCRIBE_V2_REALTIME
+        } else if (!credentials.apiKey(SpeechToTextCredentialKind.AZURE).isNullOrBlank()) {
+            SpeechToTextEngine.AZURE_SPEECH
         } else {
             SpeechToTextEngine.ANDROID_CXR
         }
@@ -139,5 +153,12 @@ class SpeechToTextSettingsStore(context: Context) {
 
     fun saveSelectedEngine(engine: SpeechToTextEngine) {
         prefs.edit().putString(Constants.PREF_STT_ENGINE, engine.id).apply()
+    }
+
+    fun selectedLanguage(): TranscriptionLanguage =
+        TranscriptionLanguage.fromId(prefs.getString(Constants.PREF_STT_LANGUAGE, null))
+
+    fun saveSelectedLanguage(language: TranscriptionLanguage) {
+        prefs.edit().putString(Constants.PREF_STT_LANGUAGE, language.id).apply()
     }
 }

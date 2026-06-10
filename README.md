@@ -198,6 +198,20 @@ ElevenLabs engines:
 
 As of 2026-05-27, ElevenLabs lists a Free plan with 10k credits per month. On the current ElevenLabs API pricing table, that is roughly enough for about 4 hours 30 minutes of buffered Scribe v1/v2 speech-to-text, or about 2 hours 30 minutes of Scribe v2 Realtime. Check the [live ElevenLabs pricing page](https://elevenlabs.io/pricing) before relying on those numbers for heavy usage.
 
+Azure engine:
+
+- `Azure Speech to Text`: buffered audio only — it is **not realtime**, the transcript appears after you finish speaking. Azure AI Speech's free F0 tier includes 5 hours of standard speech-to-text per month, which makes it a good no-cost fallback. It needs both an API key and the Azure region of the Speech resource (for example `eastasia` or `westeurope`).
+
+### Transcription language
+
+The `Language` grid in the `Speech` panel forces the transcription language for every engine. `Auto` keeps the previous behavior (phone locale / engine auto-detection). Picking an explicit language matters most for Chinese:
+
+- `廣東話` (Cantonese): ElevenLabs uses the dedicated `yue` model and Azure uses `zh-HK`; both return Traditional Chinese. OpenAI has no Cantonese mode and is steered through the prompt only — prefer ElevenLabs or Azure for Cantonese.
+- `中文繁體` (Mandarin, Traditional): Azure `zh-TW` guarantees Traditional script; OpenAI is prompt-steered; ElevenLabs picks the script itself.
+- `中文简体` (Mandarin, Simplified): Azure `zh-CN`; the other providers default to Simplified for Mandarin anyway.
+
+With `Auto`, Cantonese speakers usually get Mandarin in Simplified Chinese, because providers detect "Chinese" generically — pick `廣東話` explicitly instead.
+
 ### API keys
 
 To add or change keys:
@@ -205,15 +219,16 @@ To add or change keys:
 1. Create an API key in the provider dashboard:
    - OpenAI: use the [OpenAI API keys page](https://platform.openai.com/settings/organization/api-keys) in the OpenAI platform.
    - ElevenLabs: create an API key from the ElevenLabs dashboard or Developers/API Keys area. ElevenLabs' [API authentication docs](https://elevenlabs.io/docs/api-reference/quick-start/authentication) also describe `xi-api-key` authentication.
+   - Azure: create a (free F0) Speech resource in the [Azure portal](https://portal.azure.com/#create/Microsoft.CognitiveServicesSpeechServices), then copy one of its keys and its region.
 2. Open the Rokid Relay phone app.
 3. In `Speech`, select `API`.
-4. Select `OpenAI` or `ElevenLabs`.
+4. Select `OpenAI`, `ElevenLabs`, or `Azure`.
 5. Select the model you want to use.
 6. Tap `Manage API keys`.
-7. Paste the key into the provider field.
+7. Paste the key into the provider field. For Azure, also fill in the region (for example `eastasia`).
 8. Tap `Save`.
 
-Keys are stored on the phone in app preferences encrypted with Android Keystore AES-GCM. The README, Gradle files, and `local.properties` should never contain OpenAI or ElevenLabs keys. Use `Clear` in the phone app to remove a saved key. Provider dashboards remain the source of truth for usage, quotas, billing, and key rotation.
+Keys are stored on the phone in app preferences encrypted with Android Keystore AES-GCM. The README, Gradle files, and `local.properties` should never contain OpenAI, ElevenLabs, or Azure keys. Use `Clear` in the phone app to remove a saved key. Provider dashboards remain the source of truth for usage, quotas, billing, and key rotation.
 
 ---
 
