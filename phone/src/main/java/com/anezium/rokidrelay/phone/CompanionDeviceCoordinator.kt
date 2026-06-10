@@ -2,6 +2,7 @@ package com.anezium.rokidrelay.phone
 
 import android.app.Activity
 import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothManager
 import android.bluetooth.le.ScanResult
 import android.companion.AssociationInfo
 import android.companion.AssociationRequest
@@ -23,25 +24,32 @@ import java.util.regex.Pattern
  * CXR speech engine after every reboot or background restart. A CDM association (with device
  * presence observation) exempts the app from those background-start restrictions, so the mic
  * foreground type can be acquired even when the voice reply is triggered from the glasses.
+ *
+ * The glasses are already bonded through Hi Rokid and neither respond to classic inquiry nor
+ * advertise their name over BLE, so a plain CDM discovery never finds them. CDM has a
+ * shortcut for exactly this case: a single-device request whose BluetoothDeviceFilter carries
+ * an explicit address is matched against bonded and connected devices before any scan starts,
+ * so the confirmation dialog appears immediately. The scan-based filters remain as a fallback
+ * for glasses that are not bonded yet.
  */
 object CompanionDeviceCoordinator {
     private const val TAG = "RelayCompanion"
-    private val GLASSES_NAME_PATTERN = Pattern.compile("rokid", Pattern.CASE_INSENSITIVE)
+    // The glasses report "Glasses_XXXX" as their Bluetooth name; "Rokid Glasses" is only the
+    // alias Android shows in Settings, so the filter must accept both spellings.
+    private val GLASSES_NAME_PATTERN = Pattern.compile("rokid|glasses", Pattern.CASE_INSENSITIVE)
 
-    fun hasAssociation(context: Context): Boolean = associatedAddresses(context).isNotEmpty()
-
-    fun associatedAddresses(context: Context): List<String> {
-        val manager = manager(context) ?: return emptyList()
+    fun hasAssociation(context: Context): Boolean {
+        val manager = manager(context) ?: return false
         return runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                manager.myAssociations.mapNotNull { it.deviceMacAddress?.toString() }
+                manager.myAssociations.isNotEmpty()
             } else {
                 @Suppress("DEPRECATION")
-                manager.associations.toList()
+                manager.associations.isNotEmpty()
             }
         }.getOrElse {
             Log.w(TAG, "read associations failed: ${it.message}")
-            emptyList()
+            false
         }
     }
 
@@ -50,17 +58,28 @@ object CompanionDeviceCoordinator {
             onFailure("Companion device service unavailable")
             return
         }
+        val bondedGlasses = bondedGlasses(activity)
         val request = AssociationRequest.Builder().apply {
-            addDeviceFilter(
-                BluetoothDeviceFilter.Builder()
-                    .setNamePattern(GLASSES_NAME_PATTERN)
-                    .build(),
-            )
-            addDeviceFilter(
-                BluetoothLeDeviceFilter.Builder()
-                    .setNamePattern(GLASSES_NAME_PATTERN)
-                    .build(),
-            )
+            if (bondedGlasses != null) {
+                Log.i(TAG, "requesting association with bonded ${bondedGlasses.address}")
+                setSingleDevice(true)
+                addDeviceFilter(
+                    BluetoothDeviceFilter.Builder()
+                        .setAddress(bondedGlasses.address)
+                        .build(),
+                )
+            } else {
+                addDeviceFilter(
+                    BluetoothDeviceFilter.Builder()
+                        .setNamePattern(GLASSES_NAME_PATTERN)
+                        .build(),
+                )
+                addDeviceFilter(
+                    BluetoothLeDeviceFilter.Builder()
+                        .setNamePattern(GLASSES_NAME_PATTERN)
+                        .build(),
+                )
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 setDeviceProfile(AssociationRequest.DEVICE_PROFILE_GLASSES)
             }
@@ -109,6 +128,34 @@ object CompanionDeviceCoordinator {
                 Log.w(TAG, "observe presence failed for $address: ${it.message}")
             }
         }
+    }
+
+    private fun associatedAddresses(context: Context): List<String> {
+        val manager = manager(context) ?: return emptyList()
+        return runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                manager.myAssociations.mapNotNull { it.deviceMacAddress?.toString() }
+            } else {
+                @Suppress("DEPRECATION")
+                manager.associations.toList()
+            }
+        }.getOrElse {
+            Log.w(TAG, "read associations failed: ${it.message}")
+            emptyList()
+        }
+    }
+
+    /** Needs BLUETOOTH_CONNECT; returns null when not granted or no Rokid device is bonded. */
+    private fun bondedGlasses(context: Context): BluetoothDevice? = runCatching {
+        context.getSystemService(BluetoothManager::class.java)?.adapter?.bondedDevices
+            ?.firstOrNull { device ->
+                sequenceOf(device.alias, device.name).filterNotNull().any {
+                    GLASSES_NAME_PATTERN.matcher(it).find()
+                }
+            }
+    }.getOrElse {
+        Log.w(TAG, "bonded device lookup failed: ${it.message}")
+        null
     }
 
     private fun launchChooser(activity: Activity, intentSender: IntentSender, onFailure: (String) -> Unit) {
