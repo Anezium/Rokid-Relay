@@ -40,7 +40,7 @@ class MainActivity : Activity() {
     private val modeButtons = mutableMapOf<SpeechMode, Button>()
     private val providerButtons = mutableMapOf<SpeechToTextProvider, Button>()
     private val modelOptionRows = mutableMapOf<SpeechToTextEngine, SttModelOptionRow>()
-    private val languageButtons = mutableMapOf<TranscriptionLanguage, Button>()
+    private val languageButtons = mutableMapOf<TranscriptionLanguage, TextView>()
 
     private lateinit var updateManager: GitHubUpdateManager
     private lateinit var setupRows: LinearLayout
@@ -819,18 +819,15 @@ class MainActivity : Activity() {
                 addView(LinearLayout(this@MainActivity).apply {
                     orientation = LinearLayout.HORIZONTAL
                     rowLanguages.forEachIndexed { index, language ->
-                        val button = selectorButton(language.label) {
+                        val chip = languageChip(language.label) {
                             val store = SpeechToTextSettingsStore(this@MainActivity)
                             if (store.selectedLanguage() != language) {
                                 store.saveSelectedLanguage(language)
                                 renderStatus()
                             }
                         }
-                        button.gravity = Gravity.CENTER
-                        button.includeFontPadding = false
-                        button.setPadding(dp(4), 0, dp(4), 0)
-                        languageButtons[language] = button
-                        addView(button, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
+                        languageButtons[language] = chip
+                        addView(chip, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
                             if (index > 0) leftMargin = dp(8)
                         })
                     }
@@ -843,9 +840,37 @@ class MainActivity : Activity() {
             }
         }
 
+    private fun languageChip(label: String, onClick: () -> Unit): TextView =
+        TextView(this).apply {
+            text = label
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            includeFontPadding = false
+            isAllCaps = false
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            gravity = Gravity.CENTER
+            setPadding(dp(4), 0, dp(4), 0)
+            setTextColor(COLOR_TEXT)
+            background = roundedRect(COLOR_FIELD, COLOR_STROKE, radius = 8)
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { onClick() }
+        }
+
+    private fun styleLanguageChip(chip: TextView, isSelected: Boolean) {
+        chip.setTextColor(if (isSelected) COLOR_PHOSPHOR else COLOR_TEXT)
+        chip.background = roundedRect(
+            if (isSelected) COLOR_SELECTED else COLOR_FIELD,
+            if (isSelected) COLOR_PHOSPHOR_DIM else COLOR_STROKE,
+            radius = 8,
+            strokeWidth = if (isSelected) 2 else 1,
+        )
+    }
+
     private fun updateLanguageButtons(selected: TranscriptionLanguage) {
-        languageButtons.forEach { (language, button) ->
-            styleChoiceButton(button, language == selected)
+        languageButtons.forEach { (language, chip) ->
+            styleLanguageChip(chip, language == selected)
         }
         if (::languageHint.isInitialized) {
             languageHint.text = selected.uiNote
