@@ -852,6 +852,9 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
             setPadding(dp(4), 0, dp(4), 0)
             setTextColor(COLOR_TEXT)
+            // Software layer: hardware-accelerated GradientDrawable drops the horizontal
+            // stroke segments of rounded-rect chips on some Adreno/One UI devices.
+            setLayerType(View.LAYER_TYPE_SOFTWARE, null)
             background = roundedRect(COLOR_FIELD, COLOR_STROKE, radius = 8)
             isClickable = true
             isFocusable = true
@@ -862,7 +865,7 @@ class MainActivity : Activity() {
         chip.setTextColor(if (isSelected) COLOR_PHOSPHOR else COLOR_TEXT)
         chip.background = roundedRect(
             if (isSelected) COLOR_SELECTED else COLOR_FIELD,
-            if (isSelected) COLOR_PHOSPHOR_DIM else COLOR_STROKE,
+            if (isSelected) COLOR_PHOSPHOR else COLOR_PHOSPHOR_DIM,
             radius = 8,
             strokeWidth = if (isSelected) 2 else 1,
         )
