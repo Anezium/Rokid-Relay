@@ -867,7 +867,7 @@ class MainActivity : Activity() {
             if (isSelected) COLOR_SELECTED else COLOR_FIELD,
             if (isSelected) COLOR_PHOSPHOR else COLOR_PHOSPHOR_DIM,
             radius = 8,
-            strokeWidth = if (isSelected) 2 else 1,
+            strokeWidth = 2,
         )
     }
 
