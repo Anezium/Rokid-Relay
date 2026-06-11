@@ -1,0 +1,41 @@
+id: input-alias-debounce
+name: Physical swipe alias pair moves focus exactly once
+risk: high
+app: Rokid Relay
+requires:
+  phone: false
+  glasses: true
+  accessibility: true
+build:
+  commands:
+    - .\gradlew.bat :glasses:testDebugUnitTest
+    - .\gradlew.bat :glasses:assembleDebug
+    - .\gradlew.bat :phone:assembleDebug
+steps:
+  -
+    type: broadcast
+    target: glasses
+    action: debug.RESET_STATE
+  -
+    type: keyevent
+    target: glasses
+    keys:
+      - 22
+      - 20
+  -
+    type: sleep
+    ms: 300
+  -
+    type: broadcast
+    target: glasses
+    action: debug.DUMP_STATE
+expect:
+  state:
+    selectionDelta: 1
+artifacts:
+  - phone_logcat
+  - glasses_logcat
+  - screenshot
+  - state_dump
+notes:
+  - "Back this with a pure interpreter/unit test using the same [22, 20] trace."

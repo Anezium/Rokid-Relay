@@ -462,6 +462,46 @@ object RelayHudController {
     fun twoFingerCommandsEnabled(): Boolean =
         RelayInputSettings.twoFingerCommandsEnabled(state.swipeMode, state.inboxVisible)
 
+    fun inputSnapshot(): RelayInputInterpreter.Snapshot {
+        val snapshot = state
+        val voiceActive = snapshot.isVoiceBusy()
+        val selected = snapshot.inbox.getOrNull(snapshot.inboxIndex)
+        val inboxDetailPageCount = if (
+            snapshot.inboxVisible &&
+            snapshot.inboxDetail &&
+            selected != null
+        ) {
+            NotificationTextPager.pageCount(selected.text, snapshot.notificationFontSizeSp)
+        } else {
+            1
+        }
+        val notificationPageCount = snapshot.notification?.let { model ->
+            NotificationTextPager.pageCount(model.text, snapshot.notificationFontSizeSp)
+        } ?: 0
+        return RelayInputInterpreter.Snapshot(
+            inboxOpen = snapshot.inboxVisible,
+            inboxDetailOpen = snapshot.inboxVisible && snapshot.inboxDetail,
+            inboxDetailPage = snapshot.inboxDetailPage,
+            inboxDetailPageCount = inboxDetailPageCount,
+            voiceActive = voiceActive,
+            voiceReviewing = snapshot.voiceState == "reviewing",
+            hasNotification = snapshot.notification != null,
+            hasPagedNotification = snapshot.notification != null &&
+                !snapshot.inboxVisible &&
+                !voiceActive &&
+                notificationPageCount > 1,
+            directionKeysEnabled = RelayInputSettings.directionKeysEnabled(
+                snapshot.swipeMode,
+                snapshot.inboxVisible,
+            ),
+            twoFingerCommandsEnabled = RelayInputSettings.twoFingerCommandsEnabled(
+                snapshot.swipeMode,
+                snapshot.inboxVisible,
+            ),
+            inputCombo = snapshot.inputCombo,
+        )
+    }
+
     private fun setAccessibilityEnabled(enabled: Boolean) {
         update { copy(accessibilityEnabled = enabled) }
     }

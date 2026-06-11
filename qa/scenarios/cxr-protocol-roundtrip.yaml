@@ -1,0 +1,35 @@
+id: cxr-protocol-roundtrip
+name: Phone/glasses protocol handles known and unknown messages
+risk: high
+app: Rokid Relay
+requires:
+  phone: true
+  glasses: true
+build:
+  commands:
+    - .\gradlew.bat :glasses:testDebugUnitTest
+    - .\gradlew.bat :glasses:assembleDebug
+    - .\gradlew.bat :phone:assembleDebug
+steps:
+  -
+    type: broadcast
+    target: phone
+    action: debug.SEND_FAKE_CXR_MESSAGE
+  -
+    type: broadcast
+    target: phone
+    action: debug.DUMP_STATE
+  -
+    type: broadcast
+    target: glasses
+    action: debug.DUMP_STATE
+expect:
+  state:
+    protocolError: false
+artifacts:
+  - phone_logcat
+  - glasses_logcat
+  - screenshot
+  - state_dump
+notes:
+  - "Pure codec tests should cover invalid JSON, unknown type, old version, and extra fields."

@@ -1,0 +1,38 @@
+id: notification-direct-reply
+name: Replyable notification reaches glasses and records reply result
+risk: high
+app: Rokid Relay
+requires:
+  phone: true
+  glasses: true
+  notification_access: true
+build:
+  commands:
+    - .\gradlew.bat :glasses:testDebugUnitTest
+    - .\gradlew.bat :glasses:assembleDebug
+    - .\gradlew.bat :phone:assembleDebug
+steps:
+  -
+    type: broadcast
+    target: phone
+    action: debug.POST_TEST_NOTIFICATION
+  -
+    type: sleep
+    ms: 1000
+  -
+    type: screenshot
+    target: glasses
+  -
+    type: broadcast
+    target: phone
+    action: debug.DUMP_STATE
+expect:
+  state:
+    lastNotificationReplyable: true
+artifacts:
+  - phone_logcat
+  - glasses_logcat
+  - screenshot
+  - state_dump
+notes:
+  - "Add long, non-replyable, burst, and cleared-notification variants."

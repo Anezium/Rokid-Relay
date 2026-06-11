@@ -1,0 +1,34 @@
+id: helper-install-version-refresh
+name: Phone update refreshes stale bundled glasses helper
+risk: high
+app: Rokid Relay
+requires:
+  phone: true
+  glasses: true
+build:
+  commands:
+    - .\gradlew.bat :glasses:testDebugUnitTest
+    - .\gradlew.bat :glasses:assembleDebug
+    - .\gradlew.bat :phone:assembleDebug
+steps:
+  -
+    type: broadcast
+    target: phone
+    action: debug.DUMP_STATE
+  -
+    type: launch
+    target: phone
+  -
+    type: broadcast
+    target: phone
+    action: debug.FORCE_HELPER_VERSION_CHECK
+expect:
+  state:
+    helperVersionCurrent: true
+artifacts:
+  - phone_logcat
+  - glasses_logcat
+  - screenshot
+  - state_dump
+notes:
+  - "Do not rely on CXR-L appIsInstalled alone; assert bundled fingerprint/version."

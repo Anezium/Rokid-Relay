@@ -1,0 +1,38 @@
+id: voice-capture-cancel-and-timeout
+name: Voice capture cancels and times out without sending blank output
+risk: high
+app: Rokid Relay
+requires:
+  phone: true
+  glasses: true
+  network: false
+build:
+  commands:
+    - .\gradlew.bat :glasses:testDebugUnitTest
+    - .\gradlew.bat :glasses:assembleDebug
+    - .\gradlew.bat :phone:assembleDebug
+steps:
+  -
+    type: broadcast
+    target: phone
+    action: debug.START_FAKE_VOICE_CAPTURE
+  -
+    type: keyevent
+    target: glasses
+    keys:
+      - 4
+  -
+    type: broadcast
+    target: phone
+    action: debug.DUMP_STATE
+expect:
+  state:
+    voiceActive: false
+    blankReplySent: false
+artifacts:
+  - phone_logcat
+  - glasses_logcat
+  - screenshot
+  - state_dump
+notes:
+  - "Add no-first-byte, silence, VAD end, and API unavailable variants."

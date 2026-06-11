@@ -1,0 +1,37 @@
+id: back-and-confirm-navigation
+name: Tap/confirm and back do not trap the HUD
+risk: medium
+app: Rokid Relay
+requires:
+  phone: false
+  glasses: true
+build:
+  commands:
+    - .\gradlew.bat :glasses:testDebugUnitTest
+    - .\gradlew.bat :glasses:assembleDebug
+    - .\gradlew.bat :phone:assembleDebug
+steps:
+  -
+    type: keyevent
+    target: glasses
+    keys:
+      - 23
+  -
+    type: keyevent
+    target: glasses
+    keys:
+      - 4
+  -
+    type: broadcast
+    target: glasses
+    action: debug.DUMP_STATE
+expect:
+  state:
+    canExit: true
+artifacts:
+  - phone_logcat
+  - glasses_logcat
+  - screenshot
+  - state_dump
+notes:
+  - "Assert mode transitions, not just screenshots."

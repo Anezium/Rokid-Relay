@@ -41,79 +41,62 @@ class MainActivity : Activity() {
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         if (event?.repeatCount ?: 0 > 0) return true
+        val snapshot = RelayHudController.inputSnapshot()
         RelayDirectionKeyMapper.directionFromKey(keyCode)?.let { direction ->
-            if (!RelayHudController.directionKeysEnabled()) return super.onKeyDown(keyCode, event)
-            return handleDirection(direction)
+            if (!snapshot.directionKeysEnabled) return super.onKeyDown(keyCode, event)
+            val decision = inputInterpreter.handleDirectionKey(
+                snapshot = snapshot,
+                direction = direction,
+                nowMs = SystemClock.elapsedRealtime(),
+            )
+            executeInputActions(decision.actions)
+            return decision.consumed
         }
         return when (keyCode) {
             KeyEvent.KEYCODE_ENTER,
             KeyEvent.KEYCODE_DPAD_CENTER,
             -> {
-                when {
-                    RelayHudController.isVoiceReviewing() -> RelayBridge.startVoice()
-                    RelayHudController.isVoiceActive() -> RelayBridge.cancelVoice()
-                    RelayHudController.isInboxDetailOpen() -> RelayBridge.startVoice()
-                    RelayHudController.isInboxOpen() -> RelayHudController.openInboxDetail()
-                    RelayHudController.hasNotification() -> RelayBridge.startVoice()
-                    else -> openAccessibilitySettings()
-                }
-                true
+                val decision = inputInterpreter.handleConfirm(
+                    snapshot = snapshot,
+                    mode = RelayInputInterpreter.ConfirmMode.ACTIVITY_IMMEDIATE,
+                )
+                executeInputActions(decision.actions)
+                if (decision.consumed) true else super.onKeyDown(keyCode, event)
             }
             KeyEvent.KEYCODE_BACK -> {
-                if (RelayHudController.isInboxOpen()) {
-                    if (RelayHudController.isVoiceActive()) RelayBridge.cancelVoice()
-                    RelayHudController.backInInbox()
-                    true
-                } else if (RelayHudController.hasNotification()) {
-                    RelayBridge.hideNotification()
-                    true
-                } else {
-                    super.onKeyDown(keyCode, event)
-                }
+                val decision = inputInterpreter.handleBack(
+                    snapshot = snapshot,
+                    mode = RelayInputInterpreter.BackMode.ACTIVITY,
+                )
+                executeInputActions(decision.actions)
+                if (decision.consumed) true else super.onKeyDown(keyCode, event)
             }
             else -> super.onKeyDown(keyCode, event)
         }
     }
 
-    private fun handleDirection(direction: RelayDirection): Boolean {
-        if (RelayHudController.isVoiceActive()) return true
-        if (!directionDebouncer.accept(direction, SystemClock.elapsedRealtime())) return true
-        if (RelayHudController.isInboxDetailOpen()) {
-            pageInboxDetail(direction)
-            return true
+    private fun executeInputActions(actions: List<RelayInputInterpreter.Action>) {
+        actions.forEach { action ->
+            when (action) {
+                RelayInputInterpreter.Action.StartVoice -> RelayBridge.startVoice()
+                RelayInputInterpreter.Action.CancelVoice -> RelayBridge.cancelVoice()
+                RelayInputInterpreter.Action.OpenInbox -> RelayHudController.openInbox()
+                RelayInputInterpreter.Action.OpenInboxDetail -> RelayHudController.openInboxDetail()
+                RelayInputInterpreter.Action.BackInInbox -> RelayHudController.backInInbox()
+                RelayInputInterpreter.Action.HideNotification -> RelayBridge.hideNotification()
+                RelayInputInterpreter.Action.OpenAccessibilitySettings -> openAccessibilitySettings()
+                is RelayInputInterpreter.Action.NavigateInbox -> RelayHudController.navigateInbox(action.delta)
+                is RelayInputInterpreter.Action.PageInboxDetail -> RelayHudController.pageInboxDetail(action.delta)
+                is RelayInputInterpreter.Action.PageNotification -> RelayHudController.pageNotification(action.delta)
+                is RelayInputInterpreter.Action.KeepReplyScreenOn,
+                is RelayInputInterpreter.Action.CaptureCommandVolume,
+                RelayInputInterpreter.Action.RestoreCommandVolumeSoon,
+                RelayInputInterpreter.Action.ScheduleCommandVolumeClear,
+                RelayInputInterpreter.Action.CancelSingleTap,
+                is RelayInputInterpreter.Action.ScheduleSingleTap,
+                -> Unit
+            }
         }
-        if (RelayHudController.isInboxOpen()) {
-            RelayHudController.navigateInbox(if (direction == RelayDirection.LEFT) -1 else 1)
-            return true
-        }
-        if (RelayHudController.hasNotification()) {
-            if (!pageNotification(direction)) RelayBridge.startVoice()
-            return true
-        }
-        return if (addToCombo(direction)) {
-            RelayHudController.openInbox()
-            comboBuffer.clear()
-            true
-        } else {
-            false
-        }
-    }
-
-    private fun pageInboxDetail(direction: RelayDirection) {
-        RelayHudController.pageInboxDetail(if (direction == RelayDirection.LEFT) -1 else 1)
-    }
-
-    private fun pageNotification(direction: RelayDirection): Boolean {
-        if (!RelayHudController.hasPagedNotification()) return false
-        return RelayHudController.pageNotification(if (direction == RelayDirection.LEFT) -1 else 1)
-    }
-
-    private fun addToCombo(direction: RelayDirection): Boolean {
-        return comboBuffer.add(
-            nowMs = SystemClock.elapsedRealtime(),
-            direction = direction,
-            combo = RelayHudController.inputCombo(),
-        ).matched
     }
 
     private fun openAccessibilitySettings() {
@@ -126,6 +109,5 @@ class MainActivity : Activity() {
         }
     }
 
-    private val comboBuffer = RelayInputComboBuffer()
-    private val directionDebouncer = RelayDirectionDebouncer()
+    private val inputInterpreter = RelayInputInterpreter()
 }

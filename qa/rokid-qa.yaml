@@ -1,0 +1,19 @@
+project: Rokid Relay
+phoneModules:
+  - phone
+glassesModules:
+  - glasses
+packages:
+  phone:
+    - com.anezium.rokidrelay.phone
+  glasses:
+    - com.anezium.rokidrelay.glasses
+buildCommands:
+  - .\gradlew.bat :glasses:testDebugUnitTest
+  - .\gradlew.bat :glasses:assembleDebug
+  - .\gradlew.bat :phone:assembleDebug
+scenarioDir: qa/scenarios
+artifactDir: qa/artifacts
+notes:
+  - "Generated profile. Edit serials, package names, and expectations after the first device run."
+  - Use explicit phone/glasses serials when more than one ADB device is connected.

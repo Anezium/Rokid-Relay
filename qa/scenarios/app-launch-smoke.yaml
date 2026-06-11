@@ -1,0 +1,38 @@
+id: app-launch-smoke
+name: "Build, install, launch, and capture baseline state"
+risk: high
+app: Rokid Relay
+requires:
+  phone: true
+  glasses: true
+  network: false
+build:
+  commands:
+    - .\gradlew.bat :glasses:testDebugUnitTest
+    - .\gradlew.bat :glasses:assembleDebug
+    - .\gradlew.bat :phone:assembleDebug
+steps:
+  -
+    type: launch
+    target: phone
+  -
+    type: sleep
+    ms: 1000
+  -
+    type: logcat
+    target: phone
+  -
+    type: screenshot
+    target: glasses
+expect:
+  log_contains:
+    - no crash
+  state:
+    launched: true
+artifacts:
+  - phone_logcat
+  - glasses_logcat
+  - screenshot
+  - state_dump
+notes:
+  - Replace placeholder expectations with a debug DUMP_STATE assertion.

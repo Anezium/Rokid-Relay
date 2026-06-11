@@ -60,15 +60,12 @@ class RelayAccessibilityService : AccessibilityService() {
     private var clearCommandVolumeRunnable: Runnable? = null
     private var lastReplyWakeSignature = ""
     private var lastReplyWakeAtMs = 0L
-    private val directionDebouncer = RelayDirectionDebouncer()
-    private val inboxDirectionGate = RelayInboxDirectionGate()
-    private var lastAppliedInboxDirection: AppliedInboxDirection? = null
-    private var tapArmed = false
     private val grabbedKeys = HashSet<Int>()
-    private val comboBuffer = RelayInputComboBuffer()
+    private val inputInterpreter = RelayInputInterpreter()
     private val singleTapRunnable = Runnable {
-        tapArmed = false
-        runInboxSingleTap()
+        executeInputActions(
+            inputInterpreter.handleSingleTapTimer(RelayHudController.inputSnapshot()).actions,
+        )
     }
 
     private val twoFingerReceiver = object : BroadcastReceiver() {
@@ -113,66 +110,48 @@ class RelayAccessibilityService : AccessibilityService() {
     override fun onInterrupt() = Unit
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
-        val relayActive = isRelayInteractionActive()
-        val relayKey = isRelayControlKey(event.keyCode)
+        val snapshot = RelayHudController.inputSnapshot()
+        val relayKey = isRelayControlKey(event.keyCode, snapshot)
         if (event.action == KeyEvent.ACTION_UP && grabbedKeys.remove(event.keyCode)) {
             return true
         }
         if (event.action != KeyEvent.ACTION_DOWN || event.repeatCount > 0) {
-            return (event.keyCode in grabbedKeys) || (relayActive && relayKey)
+            return (event.keyCode in grabbedKeys) || (snapshot.relayActive && relayKey)
         }
-        if (relayActive && relayKey) {
+        if (snapshot.relayActive && relayKey) {
             grabbedKeys.add(event.keyCode)
         }
 
-        if (RelayHudController.isInboxOpen()) {
-            return handleInboxKey(event.keyCode)
-        }
-
-        if (RelayHudController.isVoiceReviewing() && relayKey) {
-            if (isConfirmKey(event.keyCode)) {
-                RelayBridge.startVoice()
-            } else if (event.keyCode == KeyEvent.KEYCODE_BACK) {
-                RelayBridge.cancelVoice()
-            }
-            return true
-        }
-
-        if (RelayHudController.isVoiceActive() && relayKey) {
-            if (isConfirmKey(event.keyCode) || event.keyCode == KeyEvent.KEYCODE_BACK) {
-                RelayBridge.cancelVoice()
-            }
-            return true
-        }
-
         directionFromKey(event.keyCode)?.let { direction ->
-            if (!directionKeysEnabled()) return false
-            if (!directionDebouncer.accept(direction, SystemClock.elapsedRealtime())) return relayActive
-            if (RelayHudController.hasNotification()) {
-                keepReplyScreenOn()
-                if (!pageNotification(direction)) RelayBridge.startVoice()
-                return true
-            }
-            return handleDirectionalComboFallback(direction)
+            val decision = inputInterpreter.handleDirectionKey(
+                snapshot = snapshot,
+                direction = direction,
+                nowMs = SystemClock.elapsedRealtime(),
+            )
+            executeInputActions(decision.actions)
+            return decision.consumed
         }
 
         return when (event.keyCode) {
             in CONFIRM_KEYS -> {
-                if (RelayHudController.hasNotification()) {
-                    keepReplyScreenOn()
-                    RelayBridge.startVoice()
-                    true
-                } else {
-                    false
-                }
+                val decision = inputInterpreter.handleConfirm(
+                    snapshot = snapshot,
+                    mode = if (snapshot.inboxOpen) {
+                        RelayInputInterpreter.ConfirmMode.INBOX_TAP
+                    } else {
+                        RelayInputInterpreter.ConfirmMode.SERVICE_IMMEDIATE
+                    },
+                )
+                executeInputActions(decision.actions)
+                decision.consumed
             }
             KeyEvent.KEYCODE_BACK -> {
-                if (RelayHudController.hasNotification()) {
-                    RelayBridge.hideNotification()
-                    true
-                } else {
-                    false
-                }
+                val decision = inputInterpreter.handleBack(
+                    snapshot = snapshot,
+                    mode = RelayInputInterpreter.BackMode.ACCESSIBILITY,
+                )
+                executeInputActions(decision.actions)
+                decision.consumed
             }
             else -> false
         }
@@ -182,7 +161,7 @@ class RelayAccessibilityService : AccessibilityService() {
         hideOverlay()
         runCatching { unregisterReceiver(twoFingerReceiver) }
         main.removeCallbacks(singleTapRunnable)
-        lastAppliedInboxDirection = null
+        inputInterpreter.resetTransientState()
         clearCommandVolumeRunnable?.let { main.removeCallbacks(it) }
         clearCommandVolumeRunnable = null
         RelayHudController.removeNotificationShownListener(notificationWakeListener)
@@ -192,158 +171,14 @@ class RelayAccessibilityService : AccessibilityService() {
         super.onDestroy()
     }
 
-    private fun handleInboxKey(keyCode: Int): Boolean {
-        if (RelayHudController.isVoiceActive()) {
-            return when {
-                RelayHudController.isVoiceReviewing() && isConfirmKey(keyCode) -> {
-                    RelayBridge.startVoice()
-                    true
-                }
-                isConfirmKey(keyCode) -> {
-                    RelayBridge.cancelVoice()
-                    true
-                }
-                keyCode == KeyEvent.KEYCODE_BACK -> {
-                    handleInboxBack()
-                    true
-                }
-                isRelayControlKey(keyCode) -> true
-                else -> false
-            }
-        }
-
-        directionFromKey(keyCode)?.let { direction ->
-            val now = SystemClock.elapsedRealtime()
-            if (!directionDebouncer.accept(direction, now)) return true
-            if (inboxDirectionGate.acceptDirectionKey(now)) {
-                lastAppliedInboxDirection = applyInboxDirection(direction, now)
-            }
-            return true
-        }
-
-        return when (keyCode) {
-            KeyEvent.KEYCODE_ENTER,
-            KeyEvent.KEYCODE_DPAD_CENTER,
-            -> {
-                handleInboxTap()
-                true
-            }
-            KeyEvent.KEYCODE_BACK -> {
-                handleInboxBack()
-                true
-            }
-            else -> false
-        }
-    }
-
-    private fun handleInboxTap() {
-        lastAppliedInboxDirection = null
-        if (tapArmed) {
-            tapArmed = false
-            main.removeCallbacks(singleTapRunnable)
-            handleInboxBack()
-            return
-        }
-        tapArmed = true
-        main.postDelayed(singleTapRunnable, DOUBLE_TAP_MS)
-    }
-
-    private fun runInboxSingleTap() {
-        if (!RelayHudController.isInboxOpen()) return
-        if (RelayHudController.isInboxDetailOpen()) {
-            keepReplyScreenOn()
-            RelayBridge.startVoice()
-        } else {
-            RelayHudController.openInboxDetail()
-            keepReplyScreenOn(INBOX_WAKE_MS)
-        }
-    }
-
-    private fun handleInboxBack() {
-        lastAppliedInboxDirection = null
-        if (RelayHudController.isVoiceActive()) RelayBridge.cancelVoice()
-        RelayHudController.backInInbox()
-    }
-
     private fun onTwoFinger(direction: RelayDirection) {
-        val now = SystemClock.elapsedRealtime()
-        if (RelayHudController.isInboxOpen()) {
-            suppressInboxDirectionForTwoFinger(now)
-            return
-        }
-        if (!RelayHudController.twoFingerCommandsEnabled()) return
-        suppressInboxDirectionForTwoFinger(now)
-        if (!directionDebouncer.accept(direction, now)) return
-        if (RelayHudController.hasNotification()) {
-            if (commandVolume == null) commandVolume = VolumeSnapshot.capture(audioManager)
-            keepReplyScreenOn()
-            if (!pageNotification(direction)) RelayBridge.startVoice()
-            restoreCommandVolumeSoon()
-            return
-        }
-
-        val hadComboInput = comboBuffer.snapshot().isNotEmpty()
-        val comboResult = addToCombo(direction)
-        if (!hadComboInput || comboResult.resetBeforeAdd) {
-            commandVolume = VolumeSnapshot.capture(audioManager)
-        }
-        if (comboResult.matched) {
-            comboBuffer.clear()
-            RelayHudController.openInbox()
-            keepReplyScreenOn(INBOX_WAKE_MS)
-            restoreCommandVolumeSoon()
-        } else {
-            scheduleCommandVolumeClear()
-        }
-    }
-
-    private fun applyInboxDirection(direction: RelayDirection, nowMs: Long): AppliedInboxDirection? {
-        tapArmed = false
-        main.removeCallbacks(singleTapRunnable)
-        if (!RelayHudController.isInboxOpen() || RelayHudController.isVoiceActive()) return null
-        val kind = if (RelayHudController.isInboxDetailOpen()) {
-            if (!pageInboxDetail(direction)) return null
-            AppliedInboxDirection.Kind.DETAIL_PAGE
-        } else {
-            RelayHudController.navigateInbox(if (direction == RelayDirection.LEFT) -1 else 1)
-            AppliedInboxDirection.Kind.LIST
-        }
-        keepReplyScreenOn(INBOX_WAKE_MS)
-        return AppliedInboxDirection(kind, direction, nowMs)
-    }
-
-    private fun suppressInboxDirectionForTwoFinger(nowMs: Long) {
-        inboxDirectionGate.onTwoFinger(nowMs)
-        undoRecentInboxDirectionForTwoFinger(nowMs)
-    }
-
-    private fun undoRecentInboxDirectionForTwoFinger(nowMs: Long) {
-        val applied = lastAppliedInboxDirection ?: return
-        if (!inboxDirectionGate.shouldUndoDirectionForTwoFinger(applied.receivedAtMs, nowMs)) return
-        lastAppliedInboxDirection = null
-        if (!RelayHudController.isInboxOpen() || RelayHudController.isVoiceActive()) return
-        val reverseDelta = if (applied.direction == RelayDirection.LEFT) 1 else -1
-        when (applied.kind) {
-            AppliedInboxDirection.Kind.LIST -> RelayHudController.navigateInbox(reverseDelta)
-            AppliedInboxDirection.Kind.DETAIL_PAGE -> RelayHudController.pageInboxDetail(reverseDelta)
-        }
-    }
-
-    private fun handleDirectionalComboFallback(direction: RelayDirection): Boolean {
-        if (!addToCombo(direction).matched) return false
-        comboBuffer.clear()
-        RelayHudController.openInbox()
-        keepReplyScreenOn(INBOX_WAKE_MS)
-        return true
-    }
-
-    private fun pageInboxDetail(direction: RelayDirection): Boolean {
-        return RelayHudController.pageInboxDetail(if (direction == RelayDirection.LEFT) -1 else 1)
-    }
-
-    private fun pageNotification(direction: RelayDirection): Boolean {
-        if (!RelayHudController.hasPagedNotification()) return false
-        return RelayHudController.pageNotification(if (direction == RelayDirection.LEFT) -1 else 1)
+        executeInputActions(
+            inputInterpreter.handleTwoFinger(
+                snapshot = RelayHudController.inputSnapshot(),
+                direction = direction,
+                nowMs = SystemClock.elapsedRealtime(),
+            ).actions,
+        )
     }
 
     private fun notificationWakeDuration(popupDurationMs: Long): Long =
@@ -353,34 +188,50 @@ class RelayAccessibilityService : AccessibilityService() {
             NOTIFICATION_VISIBLE_WAKE_MS
         }
 
-    private fun addToCombo(direction: RelayDirection): RelayInputComboBuffer.Result =
-        comboBuffer.add(
-            nowMs = SystemClock.elapsedRealtime(),
-            direction = direction,
-            combo = RelayHudController.inputCombo(),
-        )
-
     private fun directionFromKey(keyCode: Int): RelayDirection? =
         RelayDirectionKeyMapper.directionFromKey(keyCode)
 
-    /**
-     * Direction keys come from single-finger swipes; two-finger swipes arrive as broadcasts.
-     */
-    private fun directionKeysEnabled(): Boolean =
-        RelayHudController.directionKeysEnabled()
-
-    private fun isRelayControlKey(keyCode: Int): Boolean =
-        (directionFromKey(keyCode) != null && directionKeysEnabled()) ||
+    private fun isRelayControlKey(
+        keyCode: Int,
+        snapshot: RelayInputInterpreter.Snapshot,
+    ): Boolean =
+        (directionFromKey(keyCode) != null && snapshot.directionKeysEnabled) ||
             isConfirmKey(keyCode) ||
             keyCode == KeyEvent.KEYCODE_BACK
 
-    private fun isRelayInteractionActive(): Boolean =
-        RelayHudController.isInboxOpen() ||
-            RelayHudController.hasNotification() ||
-            RelayHudController.isVoiceActive()
-
     private fun isConfirmKey(keyCode: Int): Boolean =
         keyCode in CONFIRM_KEYS
+
+    private fun executeInputActions(actions: List<RelayInputInterpreter.Action>) {
+        actions.forEach { action ->
+            when (action) {
+                RelayInputInterpreter.Action.StartVoice -> RelayBridge.startVoice()
+                RelayInputInterpreter.Action.CancelVoice -> RelayBridge.cancelVoice()
+                RelayInputInterpreter.Action.OpenInbox -> RelayHudController.openInbox()
+                RelayInputInterpreter.Action.OpenInboxDetail -> RelayHudController.openInboxDetail()
+                RelayInputInterpreter.Action.BackInInbox -> RelayHudController.backInInbox()
+                RelayInputInterpreter.Action.HideNotification -> RelayBridge.hideNotification()
+                RelayInputInterpreter.Action.OpenAccessibilitySettings -> Unit
+                RelayInputInterpreter.Action.RestoreCommandVolumeSoon -> restoreCommandVolumeSoon()
+                RelayInputInterpreter.Action.ScheduleCommandVolumeClear -> scheduleCommandVolumeClear()
+                RelayInputInterpreter.Action.CancelSingleTap -> main.removeCallbacks(singleTapRunnable)
+                is RelayInputInterpreter.Action.NavigateInbox -> RelayHudController.navigateInbox(action.delta)
+                is RelayInputInterpreter.Action.PageInboxDetail -> RelayHudController.pageInboxDetail(action.delta)
+                is RelayInputInterpreter.Action.PageNotification -> RelayHudController.pageNotification(action.delta)
+                is RelayInputInterpreter.Action.KeepReplyScreenOn -> keepReplyScreenOn(action.durationMs)
+                is RelayInputInterpreter.Action.CaptureCommandVolume -> captureCommandVolume(action.replaceExisting)
+                is RelayInputInterpreter.Action.ScheduleSingleTap -> {
+                    main.removeCallbacks(singleTapRunnable)
+                    main.postDelayed(singleTapRunnable, action.delayMs)
+                }
+            }
+        }
+    }
+
+    private fun captureCommandVolume(replaceExisting: Boolean) {
+        if (!replaceExisting && commandVolume != null) return
+        commandVolume = VolumeSnapshot.capture(audioManager)
+    }
 
     private fun restoreCommandVolumeSoon() {
         val snapshot = commandVolume ?: return
@@ -528,7 +379,6 @@ class RelayAccessibilityService : AccessibilityService() {
             "com.android.action.ACTION_TWO_FINGER_SWIPE_FORWARD"
         private const val ACTION_TWO_FINGER_SWIPE_BACK =
             "com.android.action.ACTION_TWO_FINGER_SWIPE_BACK"
-        private const val DOUBLE_TAP_MS = 220L
         private const val NOTIFICATION_WAKE_MS = 5_000L
         private const val NOTIFICATION_WAKE_MARGIN_MS = 2_000L
         private const val MIN_NOTIFICATION_WAKE_MS = 5_000L
@@ -551,17 +401,6 @@ class RelayAccessibilityService : AccessibilityService() {
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
-
-    private data class AppliedInboxDirection(
-        val kind: Kind,
-        val direction: RelayDirection,
-        val receivedAtMs: Long,
-    ) {
-        enum class Kind {
-            LIST,
-            DETAIL_PAGE,
-        }
-    }
 
     private class VolumeSnapshot(
         private val music: Int,
