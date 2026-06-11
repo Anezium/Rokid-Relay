@@ -2,6 +2,7 @@
 build/
 **/build/
 local.properties
+qa/artifacts/
 *.apk
 *.aab
 *.jks
