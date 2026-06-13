@@ -8,6 +8,9 @@ import android.app.PendingIntent
 import android.app.RemoteInput
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.os.Build
 
 internal object TestNotificationPoster {
@@ -25,6 +28,34 @@ internal object TestNotificationPoster {
             .setContentTitle("Rokid Relay test")
             .setContentText(message)
             .setStyle(Notification.BigTextStyle().bigText(message))
+            .setCategory(Notification.CATEGORY_MESSAGE)
+            .setContentIntent(contentIntent(appContext, notificationId))
+            .setAutoCancel(false)
+            .addAction(replyAction(appContext, notificationId, NO_THREAD_INDEX))
+            .build()
+
+        manager.notify(notificationId, notification)
+    }
+
+    fun postImage(
+        context: Context,
+        message: String,
+        notificationId: Int,
+    ) {
+        val appContext = context.applicationContext
+        val manager = appContext.getSystemService(NotificationManager::class.java)
+        ensureChannel(manager)
+
+        val picture = testPicture(appContext)
+        val notification = Notification.Builder(appContext, Constants.TEST_NOTIFICATION_CHANNEL)
+            .setSmallIcon(R.drawable.ic_stat_relay)
+            .setContentTitle("Rokid Relay image test")
+            .setContentText(message)
+            .setStyle(
+                Notification.BigPictureStyle()
+                    .bigPicture(picture)
+                    .setSummaryText(message),
+            )
             .setCategory(Notification.CATEGORY_MESSAGE)
             .setContentIntent(contentIntent(appContext, notificationId))
             .setAutoCancel(false)
@@ -127,6 +158,12 @@ internal object TestNotificationPoster {
 
     private fun immutableFlag(): Int =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
+
+    private fun testPicture(context: Context): Bitmap =
+        BitmapFactory.decodeResource(context.resources, R.drawable.rokid_notification_preview)
+            ?: Bitmap.createBitmap(512, 512, Bitmap.Config.ARGB_8888).apply {
+                eraseColor(Color.BLACK)
+            }
 
     private const val NO_THREAD_INDEX = 0
 }

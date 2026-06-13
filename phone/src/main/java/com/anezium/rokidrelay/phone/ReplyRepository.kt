@@ -31,6 +31,7 @@ object ReplyRepository {
         val actionIntent: PendingIntent,
         val remoteInputs: Array<RemoteInput>,
         val capturedAtMs: Long,
+        val imagePreview: NotificationImagePreview? = null,
     )
 
     private data class IndexedMessage(
@@ -50,10 +51,16 @@ object ReplyRepository {
         val extras = sbn.notification.extras
         val appLabel = appLabel(context, sbn.packageName)
         val title = extras.charSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
-        val messageLimit = NotificationSettingsStore(context).threadMessageLimit()
+        val settings = NotificationSettingsStore(context)
+        val messageLimit = settings.threadMessageLimit()
         val text = notificationText(extras, messageLimit)
-        val revision = notificationRevision(sbn, extras)
-        if (hasRemoteInputHistory(extras) && NotificationSettingsStore(context).clearPhoneNotificationAfterReply()) {
+        val imagePreview = if (settings.notificationImagePreviewsEnabled()) {
+            NotificationImageExtractor.extract(context, sbn.notification)
+        } else {
+            null
+        }
+        val revision = notificationRevision(sbn, extras, imagePreview)
+        if (hasRemoteInputHistory(extras) && settings.clearPhoneNotificationAfterReply()) {
             NotificationControl.cancelAfterReply(sbn.key)
         }
         val previous = pending[id]
@@ -64,6 +71,7 @@ object ReplyRepository {
                 title = title,
                 text = text,
                 revision = revision,
+                imagePreview = imagePreview,
             )
         val reply = PendingReply(
             id = id,
@@ -80,12 +88,13 @@ object ReplyRepository {
             } else {
                 previous?.capturedAtMs ?: nextCaptureAtMs()
             },
+            imagePreview = imagePreview,
         )
         pending[id] = reply
         val mostRecent = isMostRecent(reply.id)
         Log.i(
             TAG,
-            "captured pkg=${sbn.packageName} id=${id.take(8)} changed=$contentChanged mostRecent=$mostRecent textLen=${text.length}",
+            "captured pkg=${sbn.packageName} id=${id.take(8)} changed=$contentChanged mostRecent=$mostRecent textLen=${text.length} image=${imagePreview?.id?.take(8) ?: "none"}",
         )
         return CaptureResult(
             reply = reply,
@@ -198,14 +207,21 @@ object ReplyRepository {
             .joinToString("\n")
     }
 
-    private fun notificationRevision(sbn: StatusBarNotification, extras: Bundle): String {
+    private fun notificationRevision(
+        sbn: StatusBarNotification,
+        extras: Bundle,
+        imagePreview: NotificationImagePreview?,
+    ): String {
+        val imageRevision = imagePreview?.let { preview ->
+            ":img:${preview.id}:${preview.width}x${preview.height}:${preview.bytes.size}"
+        } ?: ":img:none"
         val messages = messagingStyleMessages(extras)
         if (messages.isNotEmpty()) {
             val first = messages.first()
             val last = messages.last()
-            return "msg:${messages.size}:${first.timestamp}:${last.timestamp}"
+            return "msg:${messages.size}:${first.timestamp}:${last.timestamp}$imageRevision"
         }
-        return "plain:${sbn.notification.`when`}"
+        return "plain:${sbn.notification.`when`}$imageRevision"
     }
 
     private fun hasRemoteInputHistory(extras: Bundle): Boolean =
@@ -246,12 +262,14 @@ object ReplyRepository {
         title: String,
         text: String,
         revision: String,
+        imagePreview: NotificationImagePreview?,
     ): Boolean =
         this.packageName == packageName &&
             this.appLabel == appLabel &&
             this.title == title &&
             this.text == text &&
-            this.revision == revision
+            this.revision == revision &&
+            this.imagePreview?.id == imagePreview?.id
 
     private fun nextCaptureAtMs(): Long {
         val now = System.currentTimeMillis()

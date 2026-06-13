@@ -10,8 +10,8 @@ android {
         applicationId = "com.anezium.rokidrelay.phone"
         minSdk = 31
         targetSdk = 36
-        versionCode = 14
-        versionName = "0.1.13"
+        versionCode = 15
+        versionName = "0.1.14"
     }
 
     buildTypes {
@@ -35,6 +35,7 @@ dependencies {
     implementation("androidx.core:core:1.18.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.13")
 }
 
 val copyGlassesClient = tasks.register<Copy>("copyGlassesClient") {

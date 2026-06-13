@@ -12,6 +12,7 @@ before starting, honor its STOP conditions, and update the status row when done.
 | 002 | Add a phone unit-test baseline | P1 | M | 001 | DONE |
 | 003 | Validate downloaded update APKs before opening the installer | P2 | M | 002 | DONE |
 | 004 | Extract the phone update workflow out of MainActivity | P3 | L | 003 | DONE |
+| 005 | Add notification image previews to the glasses HUD | P2 | L | - | DONE |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJECTED (with one-line rationale)
 
@@ -20,6 +21,7 @@ Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJE
 - 002 follows 001 because the phone test baseline should assert the final debug/release receiver behavior after the receiver is hardened.
 - 003 follows 002 because update validation is security-sensitive and should land with phone-side unit tests.
 - 004 follows 003 because both touch the update flow in `MainActivity.kt`; doing the validation first avoids refactoring code that is about to change.
+- 005 has no dependency on the completed hardening plans, but it should be implemented carefully because it touches the phone/glasses protocol, the helper APK version, and privacy-sensitive notification media.
 
 ## Findings Considered And Rejected
 

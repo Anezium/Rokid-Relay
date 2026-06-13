@@ -16,6 +16,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.animation.DecelerateInterpolator
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 
@@ -28,7 +29,22 @@ class RelayHudView(
         val app: String,
         val title: String,
         val text: String,
-    )
+        val imageId: String = "",
+        val imageMimeType: String = "",
+        val imageWidth: Int = 0,
+        val imageHeight: Int = 0,
+    ) {
+        val hasImage: Boolean
+            get() = imageId.isNotBlank()
+
+        fun textPageMaxLines(): Int =
+            if (hasImage) IMAGE_TEXT_MAX_LINES else DEFAULT_TEXT_MAX_LINES
+
+        companion object {
+            const val DEFAULT_TEXT_MAX_LINES = 9
+            const val IMAGE_TEXT_MAX_LINES = 5
+        }
+    }
 
     private enum class MessageBodyMode {
         NOTIFICATION_PAGE,
@@ -40,6 +56,12 @@ class RelayHudView(
     private val connectionLabel = label(15f, DIM)
     private val appLabel = label(if (overlayMode) 12f else 18f, ACCENT)
     private val titleLabel = label(if (overlayMode) 16f else 24f, TEXT)
+    private val imagePreviewView = ImageView(context).apply {
+        visibility = GONE
+        scaleType = ImageView.ScaleType.FIT_CENTER
+        adjustViewBounds = false
+        setBackgroundColor(Color.rgb(1, 3, 2))
+    }
     private val messageLabel = label(if (overlayMode) 15f else 20f, TEXT)
     private val hintLabel = label(if (overlayMode) 13f else 17f, DIM)
     private val countdownRing = CountdownRingView(context)
@@ -220,6 +242,9 @@ class RelayHudView(
 
         addView(appLabel, matchWrap())
         addView(titleLabel, matchWrap(top = 1))
+        addView(imagePreviewView, LinearLayout.LayoutParams(match(), dp(124)).apply {
+            topMargin = dp(5)
+        })
         addView(messageLabel, matchWrap(top = 4))
         addView(reviewRow, matchWrap(top = 7))
         inboxRows.forEach { row ->
@@ -266,6 +291,7 @@ class RelayHudView(
         }
         val model = notification
         if (model == null) {
+            hideImagePreview()
             visibility = INVISIBLE
             return
         }
@@ -283,9 +309,11 @@ class RelayHudView(
         titleLabel.setTextColor(TEXT)
         appLabel.text = model.app.ifBlank { "Message" }
         titleLabel.text = model.title.ifBlank { "Replyable notification" }
-        val pages = notificationPages(model.text)
+        renderImagePreview(model)
+        val maxLines = model.textPageMaxLines()
+        val pages = notificationPages(model.text, maxLines)
         val pageIndex = notificationPage.coerceIn(0, pages.lastIndex)
-        val hasVoiceTranscript = renderMessageBody(pages[pageIndex])
+        val hasVoiceTranscript = renderMessageBody(pages[pageIndex], maxLines)
         renderStatus(hasVoiceTranscript)
         renderPageHint(pageIndex, pages.size)
     }
@@ -293,6 +321,7 @@ class RelayHudView(
     private fun renderSentState() {
         visibility = VISIBLE
         hideInboxRows()
+        hideImagePreview()
         reviewRow.visibility = GONE
         appLabel.text = "Rokid Relay"
         appLabel.visibility = VISIBLE
@@ -314,6 +343,7 @@ class RelayHudView(
         titleLabel.translationY = 0f
         titleLabel.setTextColor(TEXT)
         reviewRow.visibility = GONE
+        hideImagePreview()
         appLabel.text = "Rokid Relay"
 
         if (inbox.isEmpty()) {
@@ -336,9 +366,11 @@ class RelayHudView(
             messageLabel.visibility = VISIBLE
             appLabel.text = selected.app.ifBlank { "Message" }
             titleLabel.text = selected.title.ifBlank { "Replyable notification" }
-            val pages = notificationPages(selected.text)
+            renderImagePreview(selected)
+            val maxLines = selected.textPageMaxLines()
+            val pages = notificationPages(selected.text, maxLines)
             val pageIndex = inboxDetailPage.coerceIn(0, pages.lastIndex)
-            val hasVoiceTranscript = renderMessageBody(pages[pageIndex])
+            val hasVoiceTranscript = renderMessageBody(pages[pageIndex], maxLines)
             renderStatus(hasVoiceTranscript)
             renderPageHint(pageIndex, pages.size)
             return
@@ -362,9 +394,10 @@ class RelayHudView(
                 val selectedRow = start + rowIndex == selectedIndex
                 row.visibility = VISIBLE
                 row.setTextColor(if (selectedRow) ACCENT else TEXT)
-                val preview = oneLine(NotificationTextPager.page(item.text, 0, notificationTextPaint(), notificationLayoutSpec()))
+                val preview = oneLine(NotificationTextPager.page(item.text, 0, notificationTextPaint(), notificationLayoutSpec(item.textPageMaxLines())))
+                val imagePrefix = if (item.hasImage) "[img] " else ""
                 row.text = "${if (selectedRow) ">" else " "} ${item.app.ifBlank { "Message" }}: " +
-                    item.title.ifBlank { preview.ifBlank { "Replyable notification" } } +
+                    imagePrefix + item.title.ifBlank { preview.ifBlank { "Replyable notification" } } +
                     "  $preview"
             }
         }
@@ -403,7 +436,10 @@ class RelayHudView(
         }
     }
 
-    private fun renderMessageBody(notificationText: String): Boolean {
+    private fun renderMessageBody(
+        notificationText: String,
+        maxLines: Int = NotificationModel.DEFAULT_TEXT_MAX_LINES,
+    ): Boolean {
         val transcript = activeVoiceTranscript()
         val hasVoiceTranscript = transcript.isNotBlank()
         val body = if (hasVoiceTranscript) {
@@ -420,6 +456,7 @@ class RelayHudView(
                 MessageBodyMode.NOTIFICATION_PAGE
             },
             textSizeSp = bodyTextSize,
+            notificationMaxLines = maxLines,
         )
         return hasVoiceTranscript
     }
@@ -428,6 +465,7 @@ class RelayHudView(
         text: String,
         mode: MessageBodyMode,
         textSizeSp: Float,
+        notificationMaxLines: Int = NotificationModel.DEFAULT_TEXT_MAX_LINES,
     ) {
         messageLabel.visibility = VISIBLE
         messageLabel.text = text
@@ -437,7 +475,7 @@ class RelayHudView(
             if (mode == MessageBodyMode.VOICE_TRANSCRIPT) 1.08f else 1.02f,
         )
         messageLabel.maxLines = when (mode) {
-            MessageBodyMode.NOTIFICATION_PAGE -> NOTIFICATION_PAGE_MAX_LINES
+            MessageBodyMode.NOTIFICATION_PAGE -> notificationMaxLines.coerceAtLeast(1)
             MessageBodyMode.EMPTY_INBOX -> 2
             MessageBodyMode.VOICE_TRANSCRIPT -> popupVoiceLines(text)
         }
@@ -448,8 +486,11 @@ class RelayHudView(
         }
     }
 
-    private fun notificationPages(text: String): List<String> =
-        NotificationTextPager.pages(text, notificationTextPaint(), notificationLayoutSpec())
+    private fun notificationPages(
+        text: String,
+        maxLines: Int = NotificationModel.DEFAULT_TEXT_MAX_LINES,
+    ): List<String> =
+        NotificationTextPager.pages(text, notificationTextPaint(), notificationLayoutSpec(maxLines))
 
     private fun notificationTextPaint(): TextPaint =
         TextPaint(messageLabel.paint).apply {
@@ -460,13 +501,35 @@ class RelayHudView(
             )
         }
 
-    private fun notificationLayoutSpec(): NotificationTextPager.LayoutSpec =
+    private fun notificationLayoutSpec(
+        maxLines: Int = NotificationModel.DEFAULT_TEXT_MAX_LINES,
+    ): NotificationTextPager.LayoutSpec =
         NotificationTextPager.LayoutSpec(
             widthPx = messageTextWidthPx(),
-            maxLines = NOTIFICATION_PAGE_MAX_LINES,
+            maxLines = maxLines.coerceAtLeast(1),
             lineSpacingAddPx = 1f,
             lineSpacingMultiplier = 1.02f,
         )
+
+    private fun renderImagePreview(model: NotificationModel): Boolean {
+        if (!model.hasImage || voiceState != "idle" || resultLine.isNotBlank()) {
+            hideImagePreview()
+            return false
+        }
+        val bitmap = RelayHudController.notificationImage(model.imageId)
+        if (bitmap == null) {
+            hideImagePreview()
+            return false
+        }
+        imagePreviewView.setImageBitmap(bitmap)
+        imagePreviewView.visibility = VISIBLE
+        return true
+    }
+
+    private fun hideImagePreview() {
+        imagePreviewView.setImageDrawable(null)
+        imagePreviewView.visibility = GONE
+    }
 
     private fun messageTextWidthPx(): Int {
         val labelWidth = messageLabel.width - messageLabel.paddingLeft - messageLabel.paddingRight
@@ -681,6 +744,6 @@ class RelayHudView(
         private val DIM = Color.rgb(105, 148, 118)
         private val RULE = Color.rgb(40, 78, 50)
 
-        private const val NOTIFICATION_PAGE_MAX_LINES = 9
+        private const val NOTIFICATION_PAGE_MAX_LINES = NotificationModel.DEFAULT_TEXT_MAX_LINES
     }
 }

@@ -30,6 +30,7 @@ object RelayHudController {
         val notificationFontSizeSp: Float = NotificationOverlaySettings.DEFAULT_FONT_SIZE_SP,
         val inputCombo: String = RelayInputSettings.DEFAULT_COMBO,
         val swipeMode: String = RelayInputSettings.DEFAULT_SWIPE_MODE,
+        val imageCacheVersion: Long = 0L,
     )
 
     private val main = Handler(Looper.getMainLooper())
@@ -142,15 +143,15 @@ object RelayHudController {
     fun setNotificationFontSizeSp(value: Float) {
         update {
             val cleanValue = NotificationOverlaySettings.sanitizeFontSizeSp(value)
-            val selectedText = inbox.getOrNull(inboxIndex)?.text.orEmpty()
-            val notificationText = notification?.text.orEmpty()
-            val nextDetailPage = if (inboxDetail && selectedText.isNotBlank()) {
-                inboxDetailPage.coerceIn(0, NotificationTextPager.pageCount(selectedText, cleanValue) - 1)
+            val selected = inbox.getOrNull(inboxIndex)
+            val currentNotification = notification
+            val nextDetailPage = if (inboxDetail && selected?.text?.isNotBlank() == true) {
+                inboxDetailPage.coerceIn(0, pageCount(selected, cleanValue) - 1)
             } else {
                 inboxDetailPage
             }
-            val nextNotificationPage = if (notificationText.isNotBlank()) {
-                notificationPage.coerceIn(0, NotificationTextPager.pageCount(notificationText, cleanValue) - 1)
+            val nextNotificationPage = if (currentNotification?.text?.isNotBlank() == true) {
+                notificationPage.coerceIn(0, pageCount(currentNotification, cleanValue) - 1)
             } else {
                 0
             }
@@ -204,12 +205,13 @@ object RelayHudController {
             }
             val notificationText = nextNotification?.text.orEmpty()
             val nextNotificationPage = if (notificationText.isNotBlank()) {
-                notificationPage.coerceIn(0, NotificationTextPager.pageCount(notificationText, notificationFontSizeSp) - 1)
+                nextNotification?.let { model ->
+                    notificationPage.coerceIn(0, pageCount(model, notificationFontSizeSp) - 1)
+                } ?: 0
             } else {
                 0
             }
             val nextDetail = inboxDetail && items.isNotEmpty() && sameSelectedItem
-            val selectedText = items.getOrNull(nextIndex)?.text.orEmpty()
             copy(
                 notification = nextNotification,
                 notificationPage = nextNotificationPage,
@@ -217,7 +219,7 @@ object RelayHudController {
                 inboxIndex = nextIndex,
                 inboxDetail = nextDetail,
                 inboxDetailPage = if (nextDetail && sameSelectedItem) {
-                    inboxDetailPage.coerceIn(0, NotificationTextPager.pageCount(selectedText, notificationFontSizeSp) - 1)
+                    inboxDetailPage.coerceIn(0, pageCount(items[nextIndex], notificationFontSizeSp) - 1)
                 } else {
                     0
                 },
@@ -308,7 +310,7 @@ object RelayHudController {
         val snapshot = state
         if (!snapshot.inboxVisible || !snapshot.inboxDetail) return false
         val selected = snapshot.inbox.getOrNull(snapshot.inboxIndex) ?: return true
-        val pageCount = NotificationTextPager.pageCount(selected.text, snapshot.notificationFontSizeSp)
+        val pageCount = pageCount(selected, snapshot.notificationFontSizeSp)
         if (pageCount <= 1) return false
         val nextPage = (snapshot.inboxDetailPage + delta).coerceIn(0, pageCount - 1)
         if (nextPage == snapshot.inboxDetailPage) return false
@@ -329,7 +331,7 @@ object RelayHudController {
         val snapshot = state
         if (snapshot.inboxVisible || snapshot.isVoiceBusy()) return false
         val model = snapshot.notification ?: return false
-        val pageCount = NotificationTextPager.pageCount(model.text, snapshot.notificationFontSizeSp)
+        val pageCount = pageCount(model, snapshot.notificationFontSizeSp)
         if (pageCount <= 1) return false
         val nextPage = (snapshot.notificationPage + delta).coerceIn(0, pageCount - 1)
         if (nextPage == snapshot.notificationPage) return true
@@ -423,7 +425,7 @@ object RelayHudController {
         val snapshot = state
         val model = snapshot.notification ?: return false
         if (snapshot.inboxVisible || snapshot.isVoiceBusy()) return false
-        return NotificationTextPager.pageCount(model.text, snapshot.notificationFontSizeSp) > 1
+        return pageCount(model, snapshot.notificationFontSizeSp) > 1
     }
 
     fun isInboxOpen(): Boolean = state.inboxVisible
@@ -471,12 +473,12 @@ object RelayHudController {
             snapshot.inboxDetail &&
             selected != null
         ) {
-            NotificationTextPager.pageCount(selected.text, snapshot.notificationFontSizeSp)
+            pageCount(selected, snapshot.notificationFontSizeSp)
         } else {
             1
         }
         val notificationPageCount = snapshot.notification?.let { model ->
-            NotificationTextPager.pageCount(model.text, snapshot.notificationFontSizeSp)
+            pageCount(model, snapshot.notificationFontSizeSp)
         } ?: 0
         return RelayInputInterpreter.Snapshot(
             inboxOpen = snapshot.inboxVisible,
@@ -505,6 +507,13 @@ object RelayHudController {
     private fun setAccessibilityEnabled(enabled: Boolean) {
         update { copy(accessibilityEnabled = enabled) }
     }
+
+    fun notifyImageCacheChanged() {
+        update { copy(imageCacheVersion = imageCacheVersion + 1L) }
+    }
+
+    fun notificationImage(imageId: String) =
+        RelayNotificationImageCache.get(imageId)
 
     private fun isAccessibilityEnabled(context: Context): Boolean {
         val component = ComponentName(context, RelayAccessibilityService::class.java)
@@ -603,6 +612,9 @@ object RelayHudController {
             voiceState == "recognizing" ||
             voiceState == "processing" ||
             voiceState == "reviewing"
+
+    private fun pageCount(model: RelayHudView.NotificationModel, fontSizeSp: Float): Int =
+        NotificationTextPager.pageCount(model.text, fontSizeSp, model.textPageMaxLines())
 
     private const val SENT_RESULT_HOLD_MS = 1_250L
     private const val EMPTY_INBOX_HOLD_MS = 1_500L

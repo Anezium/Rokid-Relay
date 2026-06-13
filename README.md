@@ -60,6 +60,7 @@ Rokid Relay forwards replyable Android notifications from the phone to the glass
 - The phone app listens for notifications that expose an Android `RemoteInput` reply action.
 - The phone app connects to Global Hi Rokid through CXR-L and starts or installs the glasses helper when possible.
 - The glasses app receives notification events through CXR-S and renders a compact green overlay above other glasses apps.
+- Optional image previews show small, downscaled pictures for image-bearing replyable notifications when enabled on the phone.
 - Direction input pages long notification text, and starts a voice reply for single-page popups.
 - Speech-to-text runs from the glasses microphone stream, then the phone sends the final text through the original notification reply action.
 - A small inbox lets you revisit recent replyable notifications and switch between them from the glasses.
@@ -310,6 +311,7 @@ Only enable the Accessibility service for builds you trust.
 The phone app has a `Diagnostics` panel.
 
 - `Test notification` posts a local replyable notification.
+- `Image test` posts a local replyable notification with a generated BigPicture preview.
 - `Long test` posts a long message for overlay truncation and paging checks.
 - `Burst test` posts a multi-message notification for inbox behavior checks.
 - `Last activity` shows current relay, CXR, audio, voice, and reply status.
@@ -319,6 +321,12 @@ debug-only QA hook is not exported in release builds:
 
 ```powershell
 adb shell am broadcast -n com.anezium.rokidrelay.phone/.TestNotificationReceiver -a com.anezium.rokidrelay.phone.POST_TEST_NOTIFICATION
+```
+
+For an image-preview smoke test from a debug phone build:
+
+```powershell
+adb shell am broadcast -n com.anezium.rokidrelay.phone/.TestNotificationReceiver -a com.anezium.rokidrelay.phone.POST_TEST_NOTIFICATION --ez rokid_relay_test_enable_image_previews true --ez rokid_relay_test_image true
 ```
 
 For the local test notification, `Last sent reply` shows what Relay sent through Android direct reply, and `Last received reply` shows what the test receiver actually received.
@@ -368,6 +376,7 @@ Phone to glasses:
 
 ```text
 rokid_relay.event
+rokid_relay.media
 ```
 
 Glasses to phone:
@@ -379,8 +388,10 @@ rokid_relay.command
 Payload format:
 
 - first `Caps` slot contains JSON;
+- `rokid_relay.media` uses the first `Caps` slot for `notification_image` metadata and the stream payload for bounded JPEG bytes;
 - `version` is currently `1`;
 - common phone events: `state`, `notification`, `inbox`, `voice_state`, `reply_result`, `notification_cleared`;
+- common phone media payloads: `notification_image`;
 - common glasses commands: `request_state`, `start_voice`, `retry_voice`, `cancel_voice`, `dismiss_notification`.
 
 Keep logs redacted. Do not dump notification bodies, auth tokens, API keys, MAC addresses, serial numbers, socket UUIDs, signing files, or locally built credentialed APKs.
@@ -416,6 +427,7 @@ If you change the glasses app, rebuild the phone debug APK too so the bundled `r
 - The inbox is in-memory and limited to recent pending replyable notifications. It is not persistent history.
 - The phone currently sends up to eight pending notifications to the glasses.
 - Long notification text is paged for glasses readability, with small pages rather than full transcripts on one screen.
+- Image previews are opt-in, downscaled, transient, never persisted by Relay, and sent only for replyable notifications when Android exposes an image.
 - Cloud STT sends captured glasses audio to the selected provider.
 - `Android CXR` depends on Android speech recognition availability on the phone.
 - CXR-L depends on Global Hi Rokid authorization, Bluetooth state, phone background limits, and Rokid firmware behavior.

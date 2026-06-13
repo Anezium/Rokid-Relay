@@ -173,9 +173,11 @@ object RelayBridge {
             .put("title", reply.title)
             .put("text", reply.text)
             .put("canReply", true)
+            .appendImageMetadata(reply.imagePreview)
             .appendUserSettings()
         if (sendJson(Constants.KEY_EVENT, json)) {
             if (pendingNotificationRetry?.id == reply.id) pendingNotificationRetry = null
+            sendNotificationImage(reply)
         } else {
             pendingNotificationRetry = reply
         }
@@ -224,7 +226,8 @@ object RelayBridge {
                     .put("appLabel", reply.appLabel)
                     .put("title", reply.title)
                     .put("text", reply.text)
-                    .put("canReply", true),
+                    .put("canReply", true)
+                    .appendImageMetadata(reply.imagePreview),
             )
         }
         sendJson(
@@ -541,6 +544,61 @@ object RelayBridge {
         put("inputCombo", inputStore.inputCombo())
         put("swipeMode", inputStore.swipeMode())
         return this
+    }
+
+    private fun JSONObject.appendImageMetadata(preview: NotificationImagePreview?): JSONObject {
+        if (preview == null) return this
+        put(
+            "image",
+            JSONObject()
+                .put("id", preview.id)
+                .put("mimeType", preview.mimeType)
+                .put("width", preview.width)
+                .put("height", preview.height)
+                .put("byteSize", preview.bytes.size)
+                .put("source", preview.source),
+        )
+        return this
+    }
+
+    private fun sendNotificationImage(reply: ReplyRepository.PendingReply): Boolean {
+        val preview = reply.imagePreview ?: return true
+        val localLink = link
+        if (localLink == null) {
+            markSendUnavailable("link missing", Constants.KEY_MEDIA, JSONObject().put("type", "notification_image"))
+            return false
+        }
+        val json = JSONObject()
+            .put("version", Constants.PROTOCOL_VERSION)
+            .put("type", "notification_image")
+            .put("source", "phone")
+            .put("notificationId", reply.id)
+            .put("imageId", preview.id)
+            .put("mimeType", preview.mimeType)
+            .put("width", preview.width)
+            .put("height", preview.height)
+            .put("byteSize", preview.bytes.size)
+        return runCatching {
+            val result = localLink.sendCustomCmd(
+                Constants.KEY_MEDIA,
+                Caps().apply { write(json.toString()) },
+                preview.bytes,
+            )
+            if (result == null || result < 0) {
+                markSendUnavailable("media send returned $result", Constants.KEY_MEDIA, json)
+                false
+            } else {
+                Log.i(
+                    TAG,
+                    "notification image sent id=${reply.id.take(8)} image=${preview.id.take(8)} bytes=${preview.bytes.size} result=$result",
+                )
+                true
+            }
+        }.getOrElse {
+            Log.w(TAG, "media send failed: ${it.message}")
+            markSendUnavailable("media send exception", Constants.KEY_MEDIA, json)
+            false
+        }
     }
 
     private fun sendJson(key: String, json: JSONObject): Boolean {

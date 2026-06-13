@@ -9,6 +9,7 @@ object Constants {
 
     const val KEY_EVENT = "rokid_relay.event"
     const val KEY_COMMAND = "rokid_relay.command"
+    const val KEY_MEDIA = "rokid_relay.media"
     const val PROTOCOL_VERSION = 1
 
     const val ACTION_START = "com.anezium.rokidrelay.phone.START"
@@ -20,6 +21,8 @@ object Constants {
     const val EXTRA_TEST_REPLY = "rokid_relay_test_reply"
     const val EXTRA_TEST_MESSAGE = "rokid_relay_test_message"
     const val EXTRA_TEST_LONG = "rokid_relay_test_long"
+    const val EXTRA_TEST_IMAGE = "rokid_relay_test_image"
+    const val EXTRA_TEST_ENABLE_IMAGE_PREVIEWS = "rokid_relay_test_enable_image_previews"
     const val EXTRA_TEST_ID = "rokid_relay_test_id"
     const val EXTRA_TEST_COUNT = "rokid_relay_test_count"
     const val EXTRA_TEST_THREAD_INDEX = "rokid_relay_test_thread_index"
@@ -39,6 +42,7 @@ object Constants {
     const val PREF_NOTIFICATION_FONT_SIZE_SP = "notification_font_size_sp"
     const val PREF_CLEAR_PHONE_NOTIFICATION_AFTER_REPLY = "clear_phone_notification_after_reply"
     const val PREF_PAUSE_NOTIFICATION_FORWARDING_WHEN_SCREEN_ON = "pause_notification_forwarding_when_screen_on"
+    const val PREF_NOTIFICATION_IMAGE_PREVIEWS_ENABLED = "notification_image_previews_enabled"
     const val PREF_INBOX_ENTRY_LIMIT = "inbox_entry_limit"
     const val PREF_THREAD_MESSAGE_LIMIT = "thread_message_limit"
     const val PREF_INPUT_COMBO = "input_combo"
@@ -49,5 +53,6 @@ object Constants {
 
     const val TEST_NOTIFICATION_ID = 7202
     const val TEST_NOTIFICATION_SECOND_THREAD_ID = 7203
+    const val TEST_NOTIFICATION_IMAGE_ID = 7205
     const val TEST_NOTIFICATION_CHANNEL = "rokid_relay_test"
 }

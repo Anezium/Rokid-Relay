@@ -26,6 +26,17 @@ object NotificationTextPager {
 
     fun pages(
         text: String,
+        fontSizeSp: Float,
+        maxLines: Int,
+    ): List<String> =
+        pages(
+            text = text,
+            paint = defaultPaint(fontSizeSp),
+            spec = defaultLayoutSpec(fontSizeSp).copy(maxLines = maxLines.coerceAtLeast(1)),
+        )
+
+    fun pages(
+        text: String,
         paint: TextPaint,
         spec: LayoutSpec,
     ): List<String> {
@@ -71,6 +82,12 @@ object NotificationTextPager {
         text: String,
         fontSizeSp: Float = NotificationOverlaySettings.DEFAULT_FONT_SIZE_SP,
     ): Int = pages(text, fontSizeSp).size
+
+    fun pageCount(
+        text: String,
+        fontSizeSp: Float,
+        maxLines: Int,
+    ): Int = pages(text, fontSizeSp, maxLines).size
 
     fun pageCount(
         text: String,

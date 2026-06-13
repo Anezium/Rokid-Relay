@@ -53,6 +53,16 @@ class NotificationSettingsStore(context: Context) {
         prefs.edit().putBoolean(Constants.PREF_PAUSE_NOTIFICATION_FORWARDING_WHEN_SCREEN_ON, enabled).apply()
     }
 
+    fun notificationImagePreviewsEnabled(): Boolean =
+        prefs.getBoolean(
+            Constants.PREF_NOTIFICATION_IMAGE_PREVIEWS_ENABLED,
+            DEFAULT_NOTIFICATION_IMAGE_PREVIEWS_ENABLED,
+        )
+
+    fun saveNotificationImagePreviewsEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(Constants.PREF_NOTIFICATION_IMAGE_PREVIEWS_ENABLED, enabled).apply()
+    }
+
     fun inboxEntryLimit(): Int =
         sanitizeInboxEntryLimit(prefs.getInt(Constants.PREF_INBOX_ENTRY_LIMIT, DEFAULT_INBOX_ENTRY_LIMIT))
 
@@ -84,6 +94,7 @@ class NotificationSettingsStore(context: Context) {
         const val MAX_FONT_SIZE_SP = 24.0f
         const val DEFAULT_CLEAR_PHONE_NOTIFICATION_AFTER_REPLY = true
         const val DEFAULT_PAUSE_FORWARDING_WHEN_PHONE_SCREEN_ON = false
+        const val DEFAULT_NOTIFICATION_IMAGE_PREVIEWS_ENABLED = false
         const val DEFAULT_INBOX_ENTRY_LIMIT = 16
         const val MIN_INBOX_ENTRY_LIMIT = 4
         const val MAX_INBOX_ENTRY_LIMIT = 32

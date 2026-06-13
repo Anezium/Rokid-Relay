@@ -84,6 +84,11 @@ class DiagnosticsPanel(
                 TestNotificationHarness.postTestNotification(context)
                 onStatusChanged()
             },
+            smallButton("Image test", ButtonTone.Secondary) {
+                TestNotificationHarness.postImageTestNotification(context)
+                onStatusChanged()
+                onNotice("Image test notification posted")
+            },
         ), matchWrap(top = 8))
         container.addView(rule(), matchWrap(top = 14))
         container.addView(label("Last activity"), matchWrap(top = 12))

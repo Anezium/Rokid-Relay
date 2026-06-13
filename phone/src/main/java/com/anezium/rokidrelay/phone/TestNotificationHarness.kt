@@ -14,6 +14,15 @@ object TestNotificationHarness {
     private const val TAG = "RokidRelayTestNotif"
 
     fun handlePostIntent(context: Context, intent: Intent) {
+        if (intent.getBooleanExtra(Constants.EXTRA_TEST_ENABLE_IMAGE_PREVIEWS, false)) {
+            NotificationSettingsStore(context).saveNotificationImagePreviewsEnabled(true)
+        }
+        if (intent.getBooleanExtra(Constants.EXTRA_TEST_IMAGE, false)) {
+            val message = intent.getStringExtra(Constants.EXTRA_TEST_MESSAGE)
+                ?: "Image preview test from ADB."
+            postImageTestNotification(context, message)
+            return
+        }
         val notificationId = intent.getIntExtra(Constants.EXTRA_TEST_ID, Constants.TEST_NOTIFICATION_ID)
         val messageCount = intent.getIntExtra(Constants.EXTRA_TEST_COUNT, 0)
         val threadIndex = intent.getIntExtra(
@@ -63,6 +72,15 @@ object TestNotificationHarness {
     ) {
         TestNotificationPoster.postPlain(context, message, notificationId)
         RelayBridge.setStatus("test notification posted")
+    }
+
+    fun postImageTestNotification(
+        context: Context,
+        message: String = "Image preview test. Reply from the glasses to validate the action still works.",
+        notificationId: Int = Constants.TEST_NOTIFICATION_IMAGE_ID,
+    ) {
+        TestNotificationPoster.postImage(context, message, notificationId)
+        RelayBridge.setStatus("image test notification posted")
     }
 
     fun nextThreadIndex(context: Context): Int =
@@ -119,6 +137,7 @@ object TestNotificationHarness {
         }
         TestNotificationPoster.cancel(appContext, Constants.TEST_NOTIFICATION_ID)
         TestNotificationPoster.cancel(appContext, Constants.TEST_NOTIFICATION_SECOND_THREAD_ID)
+        TestNotificationPoster.cancel(appContext, Constants.TEST_NOTIFICATION_IMAGE_ID)
         RelayBridge.setStatus("all test threads cleared")
     }
 

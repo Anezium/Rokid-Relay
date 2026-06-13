@@ -29,8 +29,9 @@ object RelayBridge {
         bridge = cxr
         RelayHudController.setConnection("connecting")
         cxr.setStatusListener(statusListener)
-        val result = cxr.subscribe(Constants.KEY_EVENT, msgCallback)
-        Log.d(TAG, "subscribe result=$result")
+        val eventResult = cxr.subscribe(Constants.KEY_EVENT, msgCallback)
+        val mediaResult = cxr.subscribe(Constants.KEY_MEDIA, msgCallback)
+        Log.d(TAG, "subscribe event=$eventResult media=$mediaResult")
         requestState()
     }
 
@@ -106,6 +107,10 @@ object RelayBridge {
 
     private val msgCallback = object : CXRServiceBridge.MsgCallback {
         override fun onReceive(msgType: String?, caps: Caps?, data: ByteArray?) {
+            if (msgType == Constants.KEY_MEDIA) {
+                handleMedia(caps, data)
+                return
+            }
             val payload = decodePayload(caps, data)
             Log.d(
                 TAG,
@@ -153,12 +158,7 @@ object RelayBridge {
             "notification" -> {
                 applySettings(obj)
                 RelayHudController.showNotification(
-                    RelayHudView.NotificationModel(
-                        id = obj.optString("notificationId"),
-                        app = obj.optString("appLabel", obj.optString("appPackage")),
-                        title = obj.optString("title"),
-                        text = obj.optString("text"),
-                    ),
+                    notificationModelFromJson(obj),
                 )
             }
             "inbox" -> {
@@ -167,12 +167,7 @@ object RelayBridge {
                 if (notifications != null) {
                     for (index in 0 until notifications.length()) {
                         val item = notifications.optJSONObject(index) ?: continue
-                        items += RelayHudView.NotificationModel(
-                            id = item.optString("notificationId"),
-                            app = item.optString("appLabel", item.optString("appPackage")),
-                            title = item.optString("title"),
-                            text = item.optString("text"),
-                        )
+                        items += notificationModelFromJson(item)
                     }
                 }
                 RelayHudController.setInbox(items)
@@ -203,6 +198,55 @@ object RelayBridge {
             }
             "notification_cleared" -> RelayHudController.clearNotification()
         }
+    }
+
+    private fun handleMedia(caps: Caps?, data: ByteArray?) {
+        val payload = decodeCapsPayload(caps)
+        if (payload.isBlank()) {
+            Log.w(TAG, "media skipped: missing metadata dataBytes=${data?.size ?: 0}")
+            return
+        }
+        val obj = runCatching { JSONObject(payload) }.onFailure {
+            Log.w(TAG, "media JSON parse failed length=${payload.length}: ${it.message}")
+        }.getOrNull() ?: return
+        if (obj.optString("type") != "notification_image") return
+        val imageId = obj.optString("imageId")
+        val stream = data?.copyOf()
+        if (imageId.isBlank() || stream == null || stream.isEmpty()) {
+            Log.w(TAG, "media skipped image=${imageId.take(8)} dataBytes=${data?.size ?: 0}")
+            return
+        }
+        val expectedByteSize = obj.optInt("byteSize", stream.size)
+        Thread {
+            val stored = RelayNotificationImageCache.putEncoded(imageId, stream, expectedByteSize)
+            if (stored) {
+                main.post { RelayHudController.notifyImageCacheChanged() }
+            }
+        }.apply {
+            name = "RelayImageDecode"
+            start()
+        }
+    }
+
+    private fun decodeCapsPayload(caps: Caps?): String =
+        if (caps != null && caps.size() > 0) {
+            runCatching { caps.at(0).string }.getOrDefault("")
+        } else {
+            ""
+        }
+
+    private fun notificationModelFromJson(obj: JSONObject): RelayHudView.NotificationModel {
+        val image = obj.optJSONObject("image")
+        return RelayHudView.NotificationModel(
+            id = obj.optString("notificationId"),
+            app = obj.optString("appLabel", obj.optString("appPackage")),
+            title = obj.optString("title"),
+            text = obj.optString("text"),
+            imageId = image?.optString("id").orEmpty(),
+            imageMimeType = image?.optString("mimeType").orEmpty(),
+            imageWidth = image?.optInt("width", 0) ?: 0,
+            imageHeight = image?.optInt("height", 0) ?: 0,
+        )
     }
 
     private fun applySettings(obj: JSONObject) {

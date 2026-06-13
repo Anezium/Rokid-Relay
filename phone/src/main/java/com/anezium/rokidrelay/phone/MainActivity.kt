@@ -46,6 +46,7 @@ class MainActivity : Activity() {
     private lateinit var noticeText: TextView
     private lateinit var notificationForwardingSummary: TextView
     private lateinit var pauseForwardingWhenScreenOnCheckBox: CheckBox
+    private lateinit var notificationImagePreviewsCheckBox: CheckBox
     private lateinit var notificationDurationSummary: TextView
     private lateinit var notificationDurationInput: EditText
     private lateinit var notificationFontSizeInput: EditText
@@ -270,6 +271,10 @@ class MainActivity : Activity() {
                 savePauseForwardingWhenScreenOn(it)
             }
             addView(pauseForwardingWhenScreenOnCheckBox, matchWrap(top = 12))
+            notificationImagePreviewsCheckBox = settingsCheckBox("Image previews on glasses") {
+                saveNotificationImagePreviews(it)
+            }
+            addView(notificationImagePreviewsCheckBox, matchWrap(top = 8))
             addView(label("Popup duration"), matchWrap(top = 14))
             notificationDurationSummary = bodyText()
             addView(notificationDurationSummary, matchWrap(top = 8))
@@ -1128,6 +1133,12 @@ class MainActivity : Activity() {
             ) {
                 pauseForwardingWhenScreenOnCheckBox.isChecked = pauseWhenScreenOn
             }
+            if (::notificationImagePreviewsCheckBox.isInitialized) {
+                val imagePreviewsEnabled = store.notificationImagePreviewsEnabled()
+                if (notificationImagePreviewsCheckBox.isChecked != imagePreviewsEnabled) {
+                    notificationImagePreviewsCheckBox.isChecked = imagePreviewsEnabled
+                }
+            }
         }
 
         if (::notificationDurationSummary.isInitialized) {
@@ -1512,6 +1523,23 @@ class MainActivity : Activity() {
                 "Forwarding pauses while the phone screen is on"
             } else {
                 "Forwarding stays active while the phone screen is on"
+            },
+        )
+    }
+
+    private fun saveNotificationImagePreviews(enabled: Boolean) {
+        NotificationSettingsStore(this).saveNotificationImagePreviewsEnabled(enabled)
+        if (enabled) {
+            NotificationControl.refreshActiveNotifications()
+        } else {
+            RelayBridge.sendInbox()
+        }
+        renderStatus()
+        toastLine(
+            if (enabled) {
+                "Image previews will appear on the glasses when Android exposes them"
+            } else {
+                "Image previews are off"
             },
         )
     }
