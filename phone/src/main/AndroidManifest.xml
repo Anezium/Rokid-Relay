@@ -86,11 +86,7 @@
 
         <receiver
             android:name=".TestNotificationReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="com.anezium.rokidrelay.phone.POST_TEST_NOTIFICATION" />
-            </intent-filter>
-        </receiver>
+            android:exported="false" />
 
         <receiver
             android:name=".RelayAutostartReceiver"

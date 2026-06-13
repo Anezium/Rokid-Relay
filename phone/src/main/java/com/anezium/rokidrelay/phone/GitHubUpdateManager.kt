@@ -12,6 +12,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
 
 data class InstalledAppVersion(
     val versionName: String,
@@ -38,6 +39,13 @@ data class GitHubReleaseUpdate(
     }
 }
 
+data class DownloadedApkInfo(
+    val packageName: String,
+    val versionName: String,
+    val versionCode: Long,
+    val sha256: String,
+)
+
 data class AppUpdateUiState(
     val currentVersionName: String = "",
     val currentVersionCode: Long = 0L,
@@ -54,6 +62,36 @@ data class AppUpdateUiState(
     val apkPath: String = "",
     val status: String = "",
 )
+
+fun validateDownloadedApk(
+    apk: DownloadedApkInfo,
+    update: GitHubReleaseUpdate,
+    installed: InstalledAppVersion,
+    expectedPackageName: String,
+): DownloadedApkInfo {
+    if (apk.packageName != expectedPackageName) error("Downloaded APK package mismatch")
+
+    val downloadedUpdate = GitHubReleaseUpdate(
+        tagName = apk.versionName,
+        versionName = apk.versionName,
+        versionCode = apk.versionCode,
+        title = update.title,
+        releaseUrl = update.releaseUrl,
+        releaseNotes = update.releaseNotes,
+        apkName = update.apkName,
+        apkDownloadUrl = update.apkDownloadUrl,
+    )
+    if (!downloadedUpdate.isNewerThan(installed)) error("Downloaded APK is not newer")
+
+    update.versionCode?.let { expectedCode ->
+        if (apk.versionCode != expectedCode) error("Downloaded APK release metadata mismatch")
+    }
+    if (update.versionName.isNotBlank() && compareVersions(apk.versionName, update.versionName) != 0) {
+        error("Downloaded APK release metadata mismatch")
+    }
+
+    return apk
+}
 
 class GitHubUpdateManager(private val context: Context) {
     fun fetchLatestRelease(): GitHubReleaseUpdate {
@@ -104,6 +142,18 @@ class GitHubUpdateManager(private val context: Context) {
         return InstalledAppVersion(
             versionName = info.versionName.orEmpty().ifBlank { "0.0.0" },
             versionCode = info.longVersionCode,
+        )
+    }
+
+    fun inspectDownloadedApk(file: File): DownloadedApkInfo {
+        if (!file.exists()) error("Downloaded APK missing")
+        val packageInfo = context.packageManager.getPackageArchiveInfo(file.absolutePath, 0)
+            ?: error("Downloaded APK parse failure")
+        return DownloadedApkInfo(
+            packageName = packageInfo.packageName.orEmpty(),
+            versionName = packageInfo.versionName.orEmpty().ifBlank { "0.0.0" },
+            versionCode = packageInfo.longVersionCode,
+            sha256 = file.sha256(),
         )
     }
 
@@ -211,6 +261,19 @@ private fun extractVersionCode(vararg values: String): Long? {
         }
     }
     return null
+}
+
+private fun File.sha256(): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    inputStream().use { input ->
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        while (true) {
+            val read = input.read(buffer)
+            if (read <= 0) break
+            digest.update(buffer, 0, read)
+        }
+    }
+    return digest.digest().joinToString("") { "%02x".format(it) }
 }
 
 private fun compareVersions(candidate: String, installed: String): Int {

@@ -33,7 +33,6 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
-import java.io.File
 
 class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
@@ -42,7 +41,7 @@ class MainActivity : Activity() {
     private val modelOptionRows = mutableMapOf<SpeechToTextEngine, SttModelOptionRow>()
     private val languageButtons = mutableMapOf<TranscriptionLanguage, TextView>()
 
-    private lateinit var updateManager: GitHubUpdateManager
+    private lateinit var updateController: PhoneUpdateController
     private lateinit var setupRows: LinearLayout
     private lateinit var noticeText: TextView
     private lateinit var notificationForwardingSummary: TextView
@@ -115,11 +114,14 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        updateManager = GitHubUpdateManager(applicationContext)
-        refreshInstalledUpdateState()
+        updateController = PhoneUpdateController(applicationContext, handler) { state ->
+            updateState = state
+            renderUpdateStatus()
+        }
         requestRuntimePermissions()
         val content = buildContent()
         setContentView(content)
+        updateController.refreshInstalledUpdateState()
         KeyboardFocusScroller.install(this, content)
         registerModernBackHandler()
     }
@@ -393,10 +395,10 @@ class MainActivity : Activity() {
             addView(updateNotesText, matchWrap(top = 14))
 
             updateButton = smallButton("Check", ButtonTone.Primary) {
-                handleUpdatePrimaryAction()
+                updateController.handlePrimaryAction()
             }
             updateReleaseButton = smallButton("Release page", ButtonTone.Secondary) {
-                updateManager.openReleasePage(updateState.releaseUrl)
+                updateController.openReleasePage()
             }
             addView(buttonRow(updateButton, updateReleaseButton), matchWrap(top = 14))
         })
@@ -1242,6 +1244,7 @@ class MainActivity : Activity() {
 
         updateButton.text = when {
             updateState.checking -> "Checking"
+            updateState.downloading && updateState.apkPath.isNotBlank() -> "Validating"
             updateState.downloading -> "Downloading"
             updateState.available && updateState.apkPath.isNotBlank() -> "Open Installer"
             updateState.available -> "Install Update"
@@ -1250,161 +1253,6 @@ class MainActivity : Activity() {
         updateButton.isEnabled = !updateState.checking && !updateState.downloading
         updateReleaseButton.isEnabled = updateState.releaseUrl.isNotBlank()
         updateReleaseButton.alpha = if (updateReleaseButton.isEnabled) 1f else 0.45f
-    }
-
-    private fun handleUpdatePrimaryAction() {
-        when {
-            updateState.checking || updateState.downloading -> Unit
-            updateState.available && updateState.apkPath.isNotBlank() -> openDownloadedUpdateInstaller()
-            updateState.available -> downloadAndInstallUpdate()
-            else -> checkForUpdates()
-        }
-    }
-
-    private fun refreshInstalledUpdateState() {
-        val installed = updateManager.installedVersion()
-        updateState = updateState.copy(
-            currentVersionName = installed.versionName,
-            currentVersionCode = installed.versionCode,
-        )
-    }
-
-    private fun checkForUpdates(downloadIfAvailable: Boolean = false) {
-        if (updateState.checking || updateState.downloading) return
-        refreshInstalledUpdateState()
-        updateState = updateState.copy(
-            checking = true,
-            status = "Checking GitHub Releases...",
-            apkPath = "",
-        )
-        renderUpdateStatus()
-        Thread {
-            val installed = updateManager.installedVersion()
-            val result = runCatching { updateManager.fetchLatestRelease() }
-            handler.post {
-                result
-                    .onSuccess { latest ->
-                        val available = latest.isNewerThan(installed)
-                        updateState = updateState.copy(
-                            currentVersionName = installed.versionName,
-                            currentVersionCode = installed.versionCode,
-                            checking = false,
-                            available = available,
-                            latestTag = latest.tagName,
-                            latestVersionName = latest.versionName,
-                            latestVersionCode = latest.versionCode,
-                            releaseUrl = latest.releaseUrl,
-                            releaseNotes = latest.releaseNotes,
-                            apkName = latest.apkName,
-                            apkUrl = latest.apkDownloadUrl,
-                            status = if (available) {
-                                "Update available: ${latest.title}"
-                            } else {
-                                "You're up to date."
-                            },
-                        )
-                        renderUpdateStatus()
-                        if (available && downloadIfAvailable) downloadAndInstallUpdate()
-                    }
-                    .onFailure { error ->
-                        val message = error.message.orEmpty()
-                        updateState = updateState.copy(
-                            checking = false,
-                            available = false,
-                            status = if (message.contains("HTTP 404")) {
-                                "No GitHub release is published yet."
-                            } else {
-                                "Update check failed: ${message.ifBlank { "unknown error" }}"
-                            },
-                        )
-                        renderUpdateStatus()
-                    }
-            }
-        }.apply {
-            name = "RokidRelayUpdateCheck"
-            start()
-        }
-    }
-
-    private fun downloadAndInstallUpdate() {
-        val release = updateState.toGitHubReleaseUpdate() ?: run {
-            checkForUpdates(downloadIfAvailable = true)
-            return
-        }
-        if (!updateManager.canInstallPackages()) {
-            updateState = updateState.copy(status = "Allow installs from Rokid Relay, then tap update again.")
-            renderUpdateStatus()
-            updateManager.openInstallPermissionSettings()
-            return
-        }
-        updateState = updateState.copy(
-            downloading = true,
-            status = "Downloading ${release.apkName}...",
-        )
-        renderUpdateStatus()
-        Thread {
-            val result = runCatching { updateManager.downloadApk(release) }
-            handler.post {
-                result
-                    .onSuccess { file ->
-                        updateState = updateState.copy(
-                            downloading = false,
-                            apkPath = file.absolutePath,
-                            status = "Downloaded. Android Package Installer is opening.",
-                        )
-                        renderUpdateStatus()
-                        openDownloadedUpdateInstaller()
-                    }
-                    .onFailure { error ->
-                        updateState = updateState.copy(
-                            downloading = false,
-                            status = "Download failed: ${error.message ?: "unknown error"}",
-                        )
-                        renderUpdateStatus()
-                    }
-            }
-        }.apply {
-            name = "RokidRelayUpdateDownload"
-            start()
-        }
-    }
-
-    private fun openDownloadedUpdateInstaller() {
-        if (!updateManager.canInstallPackages()) {
-            updateState = updateState.copy(status = "Allow installs from Rokid Relay, then tap update again.")
-            renderUpdateStatus()
-            updateManager.openInstallPermissionSettings()
-            return
-        }
-        val file = File(updateState.apkPath)
-        if (!file.exists()) {
-            updateState = updateState.copy(apkPath = "", status = "Downloaded APK missing. Tap install again.")
-            renderUpdateStatus()
-            return
-        }
-        runCatching {
-            updateManager.installApk(file)
-        }.onSuccess {
-            updateState = updateState.copy(status = "Android Package Installer opened.")
-            renderUpdateStatus()
-        }.onFailure { error ->
-            updateState = updateState.copy(status = "Install failed: ${error.message ?: "unknown error"}")
-            renderUpdateStatus()
-        }
-    }
-
-    private fun AppUpdateUiState.toGitHubReleaseUpdate(): GitHubReleaseUpdate? {
-        if (apkUrl.isBlank() || apkName.isBlank()) return null
-        return GitHubReleaseUpdate(
-            tagName = latestTag,
-            versionName = latestVersionName,
-            versionCode = latestVersionCode,
-            title = latestTag.ifBlank { latestVersionName.ifBlank { apkName } },
-            releaseUrl = releaseUrl,
-            releaseNotes = releaseNotes,
-            apkName = apkName,
-            apkDownloadUrl = apkUrl,
-        )
     }
 
     private fun releaseNotesText(notes: String): String {

@@ -18,30 +18,74 @@ class ClientBootstrap(
         val status: String,
         val success: Boolean,
         val openedClient: Boolean,
+        val readyForMessages: Boolean,
     )
 
-    fun ensureReady(): Result {
+    fun ensureReady(openAfterInstall: Boolean = false): Result {
         val installed = queryInstalled()
         val apk = extractAssetApk()
         val assetInfo = apk?.clientAssetInfo()
         val shouldInstall = !installed || bundledClientChanged(assetInfo)
         if (!shouldInstall) {
-            return Result("glasses app ready in background", success = true, openedClient = false)
+            if (clientLaunchPending()) {
+                if (openAfterInstall) {
+                    return openClient(successStatus = "glasses app started after background install")
+                }
+                return Result(
+                    "glasses app waiting for foreground launch",
+                    success = true,
+                    openedClient = false,
+                    readyForMessages = false,
+                )
+            }
+            return Result(
+                "glasses app ready in background",
+                success = true,
+                openedClient = false,
+                readyForMessages = true,
+            )
         }
-        if (apk == null) return Result("glasses asset missing", success = false, openedClient = false)
+        if (apk == null) {
+            return Result(
+                "glasses asset missing",
+                success = false,
+                openedClient = false,
+                readyForMessages = false,
+            )
+        }
         Log.i(TAG, "installing bundled glasses app ${assetInfo?.label.orEmpty().ifBlank { apk.name }}")
-        if (!installApk(apk)) return Result("glasses install failed", success = false, openedClient = false)
+        if (!installApk(apk)) {
+            return Result(
+                "glasses install failed",
+                success = false,
+                openedClient = false,
+                readyForMessages = false,
+            )
+        }
         assetInfo?.let(::rememberInstalledClient)
-        // A freshly installed/updated build is not running yet; open it once so the HUD
-        // service comes up. Outside of installs the glasses app is never opened from here.
+        markClientLaunchPending()
+        if (!openAfterInstall) {
+            return Result(
+                "glasses app installed/updated in background",
+                success = true,
+                openedClient = false,
+                readyForMessages = false,
+            )
+        }
         return openClient(successStatus = "glasses app installed/updated")
     }
 
     fun openClient(successStatus: String = "glasses app running"): Result {
         return if (startClient()) {
-            Result(successStatus, success = true, openedClient = true)
+            clearClientLaunchPending()
+            Result(successStatus, success = true, openedClient = true, readyForMessages = true)
         } else {
-            Result("glasses start failed", success = false, openedClient = false)
+            Result(
+                "glasses start failed",
+                success = false,
+                openedClient = false,
+                readyForMessages = false,
+            )
         }
     }
 
@@ -115,6 +159,27 @@ class ClientBootstrap(
             .getSharedPreferences(Constants.PREFS, Context.MODE_PRIVATE)
             .edit()
             .putString(Constants.PREF_CLIENT_APK_FINGERPRINT, assetInfo.fingerprint)
+            .apply()
+    }
+
+    private fun clientLaunchPending(): Boolean =
+        context
+            .getSharedPreferences(Constants.PREFS, Context.MODE_PRIVATE)
+            .getBoolean(Constants.PREF_CLIENT_NEEDS_FOREGROUND_LAUNCH, false)
+
+    private fun markClientLaunchPending() {
+        context
+            .getSharedPreferences(Constants.PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(Constants.PREF_CLIENT_NEEDS_FOREGROUND_LAUNCH, true)
+            .apply()
+    }
+
+    private fun clearClientLaunchPending() {
+        context
+            .getSharedPreferences(Constants.PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(Constants.PREF_CLIENT_NEEDS_FOREGROUND_LAUNCH, false)
             .apply()
     }
 

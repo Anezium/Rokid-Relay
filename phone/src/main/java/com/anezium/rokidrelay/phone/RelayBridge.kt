@@ -3,6 +3,7 @@ package com.anezium.rokidrelay.phone
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import com.example.cxrglobal.CXRLink
 import com.example.cxrglobal.CxrDefs
@@ -32,6 +33,7 @@ object RelayBridge {
     private const val TAG = "RokidRelayBridge"
     private const val RECONNECT_INITIAL_DELAY_MS = 1_000L
     private const val RECONNECT_MAX_DELAY_MS = 15_000L
+    private const val FOREGROUND_OPEN_WINDOW_MS = 30_000L
     private val main = Handler(Looper.getMainLooper())
 
     @Volatile private var cxrConnected = false
@@ -49,9 +51,13 @@ object RelayBridge {
     @Volatile private var lastVoiceError = ""
     @Volatile private var bootstrapStarted = false
     @Volatile private var bootstrapInFlight = false
+    @Volatile private var bootstrapReadyForMessages = false
+    @Volatile private var bootstrapMayOpenClient = false
+    @Volatile private var bootstrapOpenClientDeadlineMs = 0L
     @Volatile private var authToken = ""
     @Volatile private var pendingNotificationRetry: ReplyRepository.PendingReply? = null
     @Volatile private var reconnectRunnable: Runnable? = null
+    @Volatile private var foregroundOpenRunnable: Runnable? = null
     private var reconnectDelayMs = RECONNECT_INITIAL_DELAY_MS
 
     private var appContext: Context? = null
@@ -60,8 +66,10 @@ object RelayBridge {
     fun start(context: Context, token: String, reason: String = "") {
         appContext = context.applicationContext
         authToken = token
+        val allowForegroundOpen = allowsGlassesForegroundStart(reason)
+        setForegroundOpenRequest(allowForegroundOpen)
         main.post {
-            startOnMain(context.applicationContext, token)
+            startOnMain(context.applicationContext, token, allowForegroundOpen)
         }
     }
 
@@ -77,6 +85,8 @@ object RelayBridge {
             glassConnected = false
             bootstrapStarted = false
             bootstrapInFlight = false
+            bootstrapReadyForMessages = false
+            clearForegroundOpenRequest()
             bootstrapState = "stopped"
             lastStatus = "stopped"
         }
@@ -145,6 +155,12 @@ object RelayBridge {
             lastStatus = "notification forwarding paused: phone screen on"
             Log.i(TAG, "notification forwarding paused id=${reply.id.take(8)}")
             sendInbox()
+            return
+        }
+        if (!canSendNotificationEvent(bootstrapReadyForMessages, cxrConnected, glassConnected, link?.isServiceConnected() == true)) {
+            pendingNotificationRetry = reply
+            lastStatus = "notification queued: glasses app not ready"
+            Log.i(TAG, "notification queued id=${reply.id.take(8)} reason=glasses app not ready")
             return
         }
         val json = JSONObject()
@@ -253,7 +269,7 @@ object RelayBridge {
         )
     }
 
-    private fun startOnMain(context: Context, token: String) {
+    private fun startOnMain(context: Context, token: String, allowForegroundOpen: Boolean = false) {
         authToken = token
         val localLink = ensureLink(context)
         bootstrapState = "waiting for glasses"
@@ -266,7 +282,7 @@ object RelayBridge {
         } else if (localLink.isServiceConnected()) {
             cxrConnected = true
             glassConnected = localLink.isGlassBtConnected()
-            maybeBootstrap()
+            maybeBootstrap(allowForegroundOpen = allowForegroundOpen)
         }
     }
 
@@ -280,6 +296,8 @@ object RelayBridge {
                 glassConnected = false
                 bootstrapStarted = false
                 bootstrapInFlight = false
+                bootstrapReadyForMessages = false
+                clearForegroundOpenRequest()
                 bootstrapState = "not connected"
                 lastStatus = "CXR-L disconnected"
                 scheduleReconnect("CXR-L disconnected")
@@ -296,6 +314,8 @@ object RelayBridge {
             } else {
                 bootstrapStarted = false
                 bootstrapInFlight = false
+                bootstrapReadyForMessages = false
+                clearForegroundOpenRequest()
                 bootstrapState = if (cxrConnected) "waiting for glasses" else "not connected"
             }
             maybeBootstrap()
@@ -347,6 +367,8 @@ object RelayBridge {
                 return@Runnable
             }
             bootstrapStarted = false
+            bootstrapReadyForMessages = false
+            clearForegroundOpenRequest()
             bootstrapState = "reconnecting"
             lastStatus = "reconnecting CXR-L"
             reconnectDelayMs = (delayMs * 2).coerceAtMost(RECONNECT_MAX_DELAY_MS)
@@ -363,25 +385,69 @@ object RelayBridge {
         reconnectDelayMs = RECONNECT_INITIAL_DELAY_MS
     }
 
-    private fun maybeBootstrap() {
+    private fun scheduleForegroundOpenAttempt(delayMs: Long = 0L) {
+        if (!foregroundOpenRequestActive()) return
+        if (foregroundOpenRunnable != null) return
+        val runnable = Runnable {
+            foregroundOpenRunnable = null
+            if (!foregroundOpenRequestActive()) return@Runnable
+            if (!cxrConnected || !glassConnected || bootstrapInFlight) {
+                scheduleForegroundOpenAttempt(delayMs = 500L)
+                return@Runnable
+            }
+            maybeBootstrap(allowForegroundOpen = true)
+        }
+        foregroundOpenRunnable = runnable
+        if (delayMs > 0L) {
+            main.postDelayed(runnable, delayMs)
+        } else {
+            main.post(runnable)
+        }
+    }
+
+    private fun maybeBootstrap(allowForegroundOpen: Boolean = false) {
         val context = appContext ?: return
         val localLink = link ?: return
         if (!cxrConnected || !glassConnected) return
         if (bootstrapInFlight) return
+        val foregroundOpenActive = allowForegroundOpen && foregroundOpenRequestActive()
         if (bootstrapStarted) {
-            flushPendingNotification()
+            if (foregroundOpenActive) {
+                bootstrapStarted = false
+                bootstrapReadyForMessages = false
+            } else if (bootstrapReadyForMessages) {
+                flushPendingNotification()
+                return
+            } else {
+                if (foregroundOpenRequestActive()) scheduleForegroundOpenAttempt()
+                return
+            }
+        }
+        if (!foregroundOpenActive && foregroundOpenRequestActive()) {
+            scheduleForegroundOpenAttempt()
             return
         }
         bootstrapStarted = true
         bootstrapInFlight = true
+        bootstrapReadyForMessages = false
         bootstrapState = "preparing glasses app"
+        val openAfterInstall = foregroundOpenActive
         Thread {
-            val result = ClientBootstrap(context, localLink).ensureReady()
+            val result = ClientBootstrap(context, localLink).ensureReady(openAfterInstall = openAfterInstall)
+            val rerunForForegroundOpen = !openAfterInstall && foregroundOpenRequestActive() && result.success
             bootstrapInFlight = false
+            if (openAfterInstall) clearForegroundOpenRequest()
+            bootstrapReadyForMessages = result.readyForMessages
+            if (rerunForForegroundOpen) {
+                bootstrapStarted = false
+                bootstrapReadyForMessages = false
+            }
             bootstrapState = result.status
             lastStatus = result.status
             sendState()
-            if (result.success) {
+            if (rerunForForegroundOpen) {
+                main.post { maybeBootstrap(allowForegroundOpen = true) }
+            } else if (result.success && result.readyForMessages) {
                 flushPendingNotification()
             }
         }.apply {
@@ -507,6 +573,36 @@ object RelayBridge {
         }
     }
 
+    private fun setForegroundOpenRequest(allowed: Boolean) {
+        if (allowed) {
+            bootstrapMayOpenClient = true
+            bootstrapOpenClientDeadlineMs = SystemClock.elapsedRealtime() + FOREGROUND_OPEN_WINDOW_MS
+            scheduleForegroundOpenAttempt()
+        } else {
+            expireForegroundOpenRequest()
+        }
+    }
+
+    private fun clearForegroundOpenRequest() {
+        bootstrapMayOpenClient = false
+        bootstrapOpenClientDeadlineMs = 0L
+        foregroundOpenRunnable?.let { main.removeCallbacks(it) }
+        foregroundOpenRunnable = null
+    }
+
+    private fun foregroundOpenRequestActive(): Boolean {
+        if (!bootstrapMayOpenClient) return false
+        if (SystemClock.elapsedRealtime() <= bootstrapOpenClientDeadlineMs) return true
+        clearForegroundOpenRequest()
+        return false
+    }
+
+    private fun expireForegroundOpenRequest() {
+        if (bootstrapMayOpenClient && SystemClock.elapsedRealtime() > bootstrapOpenClientDeadlineMs) {
+            clearForegroundOpenRequest()
+        }
+    }
+
     private fun payloadToJson(payload: ByteArray): JSONObject? =
         runCatching {
             val caps = Caps.fromBytes(payload)
@@ -514,3 +610,24 @@ object RelayBridge {
             JSONObject(caps.at(0).string)
         }.getOrNull()
 }
+
+internal fun allowsGlassesForegroundStart(reason: String): Boolean =
+    when (reason) {
+        "app_open",
+        "authorization",
+        "permissions",
+        "stt_engine",
+        "stt_provider",
+        "stt_model",
+        "microphone_permission",
+        -> true
+        else -> false
+    }
+
+internal fun canSendNotificationEvent(
+    bootstrapReadyForMessages: Boolean,
+    cxrConnected: Boolean,
+    glassConnected: Boolean,
+    serviceConnected: Boolean,
+): Boolean =
+    bootstrapReadyForMessages || (cxrConnected && glassConnected && serviceConnected)

@@ -45,6 +45,7 @@ object Constants {
     const val PREF_SWIPE_MODE = "swipe_mode"
     const val PREF_NOTIFICATION_OVERLAY_Y_OFFSET_DP = "notification_overlay_y_offset_dp"
     const val PREF_CLIENT_APK_FINGERPRINT = "client_apk_fingerprint"
+    const val PREF_CLIENT_NEEDS_FOREGROUND_LAUNCH = "client_needs_foreground_launch"
 
     const val TEST_NOTIFICATION_ID = 7202
     const val TEST_NOTIFICATION_SECOND_THREAD_ID = 7203

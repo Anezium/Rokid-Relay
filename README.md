@@ -314,7 +314,8 @@ The phone app has a `Diagnostics` panel.
 - `Burst test` posts a multi-message notification for inbox behavior checks.
 - `Last activity` shows current relay, CXR, audio, voice, and reply status.
 
-You can also post the test notification with ADB:
+You can also post the test notification with ADB from a debug phone build. This
+debug-only QA hook is not exported in release builds:
 
 ```powershell
 adb shell am broadcast -n com.anezium.rokidrelay.phone/.TestNotificationReceiver -a com.anezium.rokidrelay.phone.POST_TEST_NOTIFICATION

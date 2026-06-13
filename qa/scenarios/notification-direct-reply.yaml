@@ -5,6 +5,7 @@ app: Rokid Relay
 requires:
   phone: true
   glasses: true
+  phone_debug_build: true
   notification_access: true
 build:
   commands:
@@ -35,4 +36,5 @@ artifacts:
   - screenshot
   - state_dump
 notes:
+  - "POST_TEST_NOTIFICATION is a debug-build-only ADB QA hook; release builds should use the in-app diagnostics flow."
   - "Add long, non-replyable, burst, and cleared-notification variants."

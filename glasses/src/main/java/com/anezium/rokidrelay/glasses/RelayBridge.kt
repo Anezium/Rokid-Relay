@@ -106,19 +106,43 @@ object RelayBridge {
 
     private val msgCallback = object : CXRServiceBridge.MsgCallback {
         override fun onReceive(msgType: String?, caps: Caps?, data: ByteArray?) {
-            val payload = when {
-                data != null && data.isNotEmpty() -> String(data, Charsets.UTF_8)
-                caps != null && caps.size() > 0 -> runCatching { caps.at(0).string }.getOrDefault("")
-                else -> ""
-            }
+            val payload = decodePayload(caps, data)
+            Log.d(
+                TAG,
+                "event received type=$msgType dataBytes=${data?.size ?: 0} capsSize=${caps?.size() ?: 0} payloadLen=${payload.length}",
+            )
             if (payload.isBlank()) return
             main.post { handleEvent(payload) }
         }
     }
 
+    private fun decodePayload(caps: Caps?, data: ByteArray?): String {
+        if (data != null && data.isNotEmpty()) {
+            val raw = String(data, Charsets.UTF_8).trim()
+            if (raw.startsWith("{")) return raw
+            val serializedCapsPayload = runCatching {
+                val parsed = Caps.fromBytes(data)
+                if (parsed.size() > 0) parsed.at(0).string else ""
+            }.onFailure {
+                Log.w(TAG, "serialized event decode failed: ${it.message}")
+            }.getOrDefault("")
+            if (serializedCapsPayload.isNotBlank()) return serializedCapsPayload
+            if (raw.isNotBlank()) return raw
+        }
+        return if (caps != null && caps.size() > 0) {
+            runCatching { caps.at(0).string }.getOrDefault("")
+        } else {
+            ""
+        }
+    }
+
     private fun handleEvent(payload: String) {
-        val obj = runCatching { JSONObject(payload) }.getOrNull() ?: return
-        when (obj.optString("type")) {
+        val obj = runCatching { JSONObject(payload) }.onFailure {
+            Log.w(TAG, "event JSON parse failed length=${payload.length}: ${it.message}")
+        }.getOrNull() ?: return
+        val type = obj.optString("type")
+        Log.d(TAG, "event json type=$type")
+        when (type) {
             "state" -> {
                 applySettings(obj)
                 RelayHudController.setConnection(

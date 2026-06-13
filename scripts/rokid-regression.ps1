@@ -283,6 +283,7 @@ Capture-Logcat $Adb $GlassesSerial "glasses-input-alias" | Out-Null
 Capture-Screenshot $Adb $GlassesSerial "glasses-input-alias" | Out-Null
 Add-Result "PARTIAL" "input-alias-debounce" "Replayed ADB keyevent trace [22,20]; exact selectionDelta assertion still needs DUMP_STATE/debug hook"
 
+Write-Host "Posting debug-only phone test notification; the installed phone app must be a debug build."
 Invoke-Adb $Adb $PhoneSerial @(
     "shell",
     "am",
@@ -303,7 +304,7 @@ Capture-Logcat $Adb $PhoneSerial "phone-test-notification" | Out-Null
 Capture-Logcat $Adb $GlassesSerial "glasses-test-notification" | Out-Null
 Capture-NotificationState $Adb $PhoneSerial "phone-test-notification" | Out-Null
 Capture-Screenshot $Adb $GlassesSerial "glasses-test-notification" | Out-Null
-Add-Result "PARTIAL" "notification-direct-reply" "Posted explicit phone test notification, captured phone notification dump and glasses screenshot; automated replyable/state assertion still needs DUMP_STATE or app-private state dump"
+Add-Result "PARTIAL" "notification-direct-reply" "Posted explicit debug-only phone test notification, captured phone notification dump and glasses screenshot; automated replyable/state assertion still needs DUMP_STATE or app-private state dump"
 
 Add-Result "SKIP" "cxr-protocol-roundtrip" "Requires debug.SEND_FAKE_CXR_MESSAGE hook"
 Add-Result "SKIP" "helper-install-version-refresh" "Requires helper version/fingerprint DUMP_STATE hook"

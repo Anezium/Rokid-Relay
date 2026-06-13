@@ -34,6 +34,7 @@ dependencies {
     implementation("com.example.cxrglobal:lib:0.2.0")
     implementation("androidx.core:core:1.18.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    testImplementation("junit:junit:4.13.2")
 }
 
 val copyGlassesClient = tasks.register<Copy>("copyGlassesClient") {
