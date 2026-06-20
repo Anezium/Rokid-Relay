@@ -19,6 +19,7 @@ class RelayAutostartReceiver : BroadcastReceiver() {
                     return
                 }
                 CompanionDeviceCoordinator.startObserving(context)
+                BleWakeServer.ensureStarted(context)
                 RelayBridge.setStatus("relay armed after ${action.substringAfterLast('.')}")
             }
 
@@ -28,6 +29,7 @@ class RelayAutostartReceiver : BroadcastReceiver() {
                     BluetoothAdapter.STATE_ON
                 ) {
                     if (RelayStarter.isRelayEnabled(context)) {
+                        BleWakeServer.ensureStarted(context)
                         RelayBridge.setStatus("relay armed after BLUETOOTH_ON")
                     }
                 }

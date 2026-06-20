@@ -12,11 +12,22 @@ import org.json.JSONObject
 object RelayBridge {
     private const val TAG = "RelayBridge"
     private const val VOICE_COMMAND_DEBOUNCE_MS = 900L
+    private const val WAKE_REPLY_TIMEOUT_MS = 15_000L
 
     private val main = Handler(Looper.getMainLooper())
     private var bridge: CXRServiceBridge? = null
     private var appContext: Context? = null
     private var lastVoiceCommandAtMs = 0L
+    private var pendingWakeReplyNotificationId = ""
+    private var pendingWakeReplyExpiresAtMs = 0L
+    private val pendingWakeReplyTimeout = Runnable {
+        if (pendingWakeReplyNotificationId.isNotBlank()) {
+            pendingWakeReplyNotificationId = ""
+            pendingWakeReplyExpiresAtMs = 0L
+            RelayHudController.showTransient("Phone wake timed out")
+            RelayHudController.setVoice("idle", "")
+        }
+    }
 
     fun start(context: Context) {
         appContext = context.applicationContext
@@ -37,14 +48,10 @@ object RelayBridge {
 
     fun stop() {
         bridge = null
+        clearPendingWakeReply()
     }
 
     fun startVoice() {
-        if (!RelayHudController.isPhoneConnected()) {
-            RelayHudController.showTransient("Phone sleeping. Wait for next notification.")
-            RelayHudController.setVoice("idle", "")
-            return
-        }
         val notification = RelayHudController.currentNotificationId()
         if (notification.isBlank()) {
             RelayHudController.showTransient("No replyable notification")
@@ -58,13 +65,67 @@ object RelayBridge {
             return
         }
         if (RelayHudController.isVoiceActive()) return
+        if (!RelayHudController.isPhoneConnected()) {
+            requestPhoneWakeForReply(notification)
+            return
+        }
+        sendStartVoice(notification)
+    }
+
+    private fun sendStartVoice(notificationId: String) {
         val now = SystemClock.elapsedRealtime()
         if (now - lastVoiceCommandAtMs < VOICE_COMMAND_DEBOUNCE_MS) return
         lastVoiceCommandAtMs = now
         sendCommand("start_voice") {
-            put("notificationId", notification)
+            put("notificationId", notificationId)
         }
         RelayHudController.setVoice("listening", "")
+    }
+
+    private fun requestPhoneWakeForReply(notificationId: String) {
+        val context = appContext
+        if (context == null) {
+            RelayHudController.showTransient("Phone wake unavailable")
+            return
+        }
+        val now = SystemClock.elapsedRealtime()
+        if (pendingWakeReplyNotificationId == notificationId && now < pendingWakeReplyExpiresAtMs) {
+            RelayHudController.showTransient("Waking phone...")
+            return
+        }
+        pendingWakeReplyNotificationId = notificationId
+        pendingWakeReplyExpiresAtMs = now + WAKE_REPLY_TIMEOUT_MS
+        main.removeCallbacks(pendingWakeReplyTimeout)
+        main.postDelayed(pendingWakeReplyTimeout, WAKE_REPLY_TIMEOUT_MS)
+        RelayHudController.showTransient("Waking phone...")
+        BleWakeClient.requestWake(context, notificationId) { ok, message ->
+            if (ok) {
+                RelayHudController.showTransient(message.ifBlank { "Phone waking..." })
+            } else if (pendingWakeReplyNotificationId == notificationId) {
+                clearPendingWakeReply()
+                RelayHudController.showTransient(message.ifBlank { "Phone wake failed" })
+                RelayHudController.setVoice("idle", "")
+            }
+        }
+    }
+
+    private fun maybeStartPendingWakeReply() {
+        val notificationId = pendingWakeReplyNotificationId
+        if (notificationId.isBlank()) return
+        if (!RelayHudController.isPhoneConnected()) return
+        if (SystemClock.elapsedRealtime() > pendingWakeReplyExpiresAtMs) {
+            clearPendingWakeReply()
+            RelayHudController.showTransient("Phone wake timed out")
+            return
+        }
+        clearPendingWakeReply()
+        sendStartVoice(notificationId)
+    }
+
+    private fun clearPendingWakeReply() {
+        main.removeCallbacks(pendingWakeReplyTimeout)
+        pendingWakeReplyNotificationId = ""
+        pendingWakeReplyExpiresAtMs = 0L
     }
 
     fun dismiss() {
@@ -90,7 +151,10 @@ object RelayBridge {
 
     private val statusListener = object : CXRServiceBridge.StatusListener {
         override fun onConnected(name: String?, mac: String?, deviceType: Int) {
-            main.post { RelayHudController.setConnection("connected") }
+            main.post {
+                RelayHudController.setConnection("connected")
+                maybeStartPendingWakeReply()
+            }
         }
 
         override fun onDisconnected() {
@@ -158,6 +222,7 @@ object RelayBridge {
                 RelayHudController.setConnection(
                     if (obj.optBoolean("glassConnected")) "connected" else "waiting",
                 )
+                maybeStartPendingWakeReply()
             }
             "phone_sleeping" -> RelayHudController.phoneSleeping()
             "settings" -> applySettings(obj)

@@ -22,26 +22,31 @@ object NotificationControl {
 
     fun refreshActiveNotifications() {
         main.post {
-            val service = listener
-            if (service == null) {
-                Log.w(TAG, "Cannot refresh active notifications: listener unavailable")
-                return@post
-            }
-            if (NotificationForwardingPolicy.isPaused(service)) {
-                Log.i(TAG, "active notification refresh skipped: phone screen on")
-                RelayBridge.sendInbox()
-                return@post
-            }
-            val count = runCatching {
-                service.activeNotifications.orEmpty().count { sbn ->
-                    ReplyRepository.capture(service, sbn) != null
-                }
-            }.onFailure {
-                Log.w(TAG, "Active notification refresh failed: ${it.message}")
-            }.getOrDefault(0)
-            Log.i(TAG, "active notification refresh count=$count")
-            RelayBridge.sendInbox()
+            refreshActiveNotificationsNow()
         }
+    }
+
+    fun refreshActiveNotificationsNow(): Int {
+        val service = listener
+        if (service == null) {
+            Log.w(TAG, "Cannot refresh active notifications: listener unavailable")
+            return 0
+        }
+        if (NotificationForwardingPolicy.isPaused(service)) {
+            Log.i(TAG, "active notification refresh skipped: phone screen on")
+            RelayBridge.sendInbox()
+            return 0
+        }
+        val count = runCatching {
+            service.activeNotifications.orEmpty().count { sbn ->
+                ReplyRepository.capture(service, sbn) != null
+            }
+        }.onFailure {
+            Log.w(TAG, "Active notification refresh failed: ${it.message}")
+        }.getOrDefault(0)
+        Log.i(TAG, "active notification refresh count=$count")
+        RelayBridge.sendInbox()
+        return count
     }
 
     fun cancelAfterReply(key: String) {

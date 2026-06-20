@@ -11,6 +11,8 @@ object Constants {
     const val KEY_COMMAND = "rokid_relay.command"
     const val KEY_MEDIA = "rokid_relay.media"
     const val PROTOCOL_VERSION = 1
+    const val BLE_WAKE_SERVICE_UUID = "8b66f35d-7db2-4b3e-9ed4-5fbc5d6b4f01"
+    const val BLE_WAKE_CHARACTERISTIC_UUID = "8b66f35e-7db2-4b3e-9ed4-5fbc5d6b4f01"
 
     const val ACTION_START = "com.anezium.rokidrelay.phone.START"
     const val ACTION_STOP = "com.anezium.rokidrelay.phone.STOP"
@@ -18,6 +20,7 @@ object Constants {
     const val ACTION_TEST_REPLY = "com.anezium.rokidrelay.phone.TEST_REPLY"
     const val EXTRA_TOKEN = "token"
     const val EXTRA_START_REASON = "start_reason"
+    const val EXTRA_WAKE_NOTIFICATION_ID = "wake_notification_id"
     const val EXTRA_TEST_REPLY = "rokid_relay_test_reply"
     const val EXTRA_TEST_MESSAGE = "rokid_relay_test_message"
     const val EXTRA_TEST_LONG = "rokid_relay_test_long"

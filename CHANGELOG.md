@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.1.15-preview.5 - 2026-06-20
+
+- Replaced the `preview.4` pending-inbox CXR-L keepalive with a BLE wake bridge.
+- The phone now arms a low-power BLE wake GATT endpoint while Relay is enabled, without keeping CXR-L open.
+- When the glasses inbox is visible after the phone has gone to sleep, tapping reply sends a BLE wake request, the phone opens CXR-L, and the glasses continue the voice reply once the link returns.
+- Refreshed active phone notifications on BLE wake so old inbox reply IDs can recover their Android `RemoteInput` action before voice capture starts.
+- Added Bluetooth advertise permission handling on the phone and Bluetooth scan/connect permission handling on the glasses helper.
+- Bumped the phone app to `0.1.15-preview.5` / `versionCode 20` and the bundled glasses helper to `0.1.10-preview.4` / `versionCode 14`.
+
 ## v0.1.15-preview.4 - 2026-06-20
 
 - Kept CXR-L awake while the phone still has pending replyable inbox entries, so older glasses inbox items can still start voice reply after the original two-minute idle window.

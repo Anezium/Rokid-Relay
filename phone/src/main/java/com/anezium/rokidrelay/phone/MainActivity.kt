@@ -132,6 +132,7 @@ class MainActivity : Activity() {
         if (!runtimePermissionRequestInFlight) {
             if (RelayStarter.isRelayEnabled(this)) {
                 CompanionDeviceCoordinator.startObserving(this)
+                BleWakeServer.ensureStarted(this)
             }
             if (RelayService.running) {
                 RelayService.refreshForeground()
@@ -164,6 +165,7 @@ class MainActivity : Activity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         runtimePermissionRequestInFlight = false
         syncSettingsAfterUserChange()
+        if (RelayStarter.isRelayEnabled(this)) BleWakeServer.ensureStarted(this)
         if (RelayService.running) RelayService.refreshForeground()
         renderStatus()
     }
@@ -1084,7 +1086,7 @@ class MainActivity : Activity() {
                 title = "Relay service",
                 value = when {
                     relayRunning -> "Awake for notification"
-                    relayEnabled -> "Armed for notifications"
+                    relayEnabled -> "Armed for notification/reply"
                     else -> "Stopped"
                 },
                 tone = if (relayRunning) StatusTone.Ready else StatusTone.Neutral,
@@ -1113,7 +1115,7 @@ class MainActivity : Activity() {
                 RelayService.running && NotificationForwardingPolicy.isPaused(this) ->
                     "Ready. Forwarding is paused while this screen is on."
                 RelayService.running -> "Awake. Relay will sleep again after the reply window."
-                RelayStarter.isRelayEnabled(this) -> "Armed. Relay wakes only when a replyable notification arrives."
+                RelayStarter.isRelayEnabled(this) -> "Armed. Relay wakes on replyable notifications or inbox reply attempts."
                 else -> "Ready to arm wake-on-notification."
             }
             noticeText.setTextColor(if (hiRokid && authSaved && notifications && sttReady) COLOR_PHOSPHOR else COLOR_MUTED)
@@ -1833,6 +1835,7 @@ class MainActivity : Activity() {
             wanted += Manifest.permission.RECORD_AUDIO
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            wanted += Manifest.permission.BLUETOOTH_ADVERTISE
             wanted += Manifest.permission.BLUETOOTH_CONNECT
             wanted += Manifest.permission.BLUETOOTH_SCAN
         }
@@ -1854,6 +1857,7 @@ class MainActivity : Activity() {
         }
         RelayStarter.armAndPrepare(this, RelayStarter.START_REASON_MANUAL)
         CompanionDeviceCoordinator.startObserving(this)
+        BleWakeServer.ensureStarted(this)
     }
 
     private fun syncSettingsAfterUserChange() {

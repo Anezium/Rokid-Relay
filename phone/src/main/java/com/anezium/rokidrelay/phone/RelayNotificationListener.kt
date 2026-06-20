@@ -9,7 +9,8 @@ class RelayNotificationListener : NotificationListenerService() {
         super.onListenerConnected()
         NotificationControl.attach(this)
         RelayBridge.setStatus("notification listener connected")
-        if (RelayStarter.isRelayEnabled(this) && RelayService.running) {
+        if (RelayStarter.isRelayEnabled(this)) {
+            BleWakeServer.ensureStarted(this)
             syncActiveNotifications()
         }
     }
@@ -17,6 +18,7 @@ class RelayNotificationListener : NotificationListenerService() {
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         sbn ?: return
         if (!RelayStarter.isRelayEnabled(this)) return
+        BleWakeServer.ensureStarted(this)
         if (NotificationForwardingPolicy.isPaused(this)) {
             Log.i(TAG, "posted pkg=${sbn.packageName} skipped=phone_screen_on")
             RelayBridge.setStatus("notification forwarding paused: phone screen on")
@@ -40,6 +42,7 @@ class RelayNotificationListener : NotificationListenerService() {
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
         sbn ?: return
         if (!RelayStarter.isRelayEnabled(this)) return
+        BleWakeServer.ensureStarted(this)
         Log.i(TAG, "removed pkg=${sbn.packageName}")
         ReplyRepository.forgetStatusBarNotification(sbn)
         if (RelayService.running) RelayBridge.sendInbox()

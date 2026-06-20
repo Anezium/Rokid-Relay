@@ -127,7 +127,7 @@ Install the phone app on the Android phone:
 adb install -r phone/build/outputs/apk/debug/phone-debug.apk
 ```
 
-Usually the phone app deploys and starts the glasses helper when you press `Start` after Hi Rokid authorization, so a normal first install only needs the phone APK. In normal use the phone service stays armed and wakes only when a replyable notification arrives. For direct glasses debugging, install the glasses APK manually:
+Usually the phone app deploys and starts the glasses helper when you press `Start` after Hi Rokid authorization, so a normal first install only needs the phone APK. In normal use the phone service stays armed and wakes when a replyable notification arrives or when the glasses inbox asks to reply through the BLE wake bridge. For direct glasses debugging, install the glasses APK manually:
 
 ```powershell
 adb install -r glasses/build/outputs/apk/debug/glasses-debug.apk
@@ -151,11 +151,11 @@ Do not publish local APKs built with private credentials, local tokens, or debug
 10. Enable `Rokid Relay overlay` in Accessibility on the glasses.
 11. Return to the glasses app. The setup screen should show `ACCESSIBILITY ON`.
 
-After the phone has a saved Hi Rokid token, notification access, and a ready STT engine, tap `Start` once to arm wake-on-notification. Boot, app update, Bluetooth reconnect, and notification-listener connection keep the app armed but do not keep CXR running.
+After the phone has a saved Hi Rokid token, notification access, and a ready STT engine, tap `Start` once to arm wake-on-notification/reply. Boot, app update, Bluetooth reconnect, and notification-listener connection keep the app armed but do not keep CXR running.
 
 The phone shows a foreground `Rokid Relay running` notification only while the relay is awake for a notification or reply window. Use the phone app `Stop` button or the foreground notification action to disarm it.
 
-When the awake window expires, Relay sleeps only if the phone has no pending replyable inbox entries. If old replyable entries still exist, CXR-L stays awake so the glasses inbox can still start a voice reply; once the inbox is empty, Relay sends a sleep event to the glasses and waits for the next replyable notification.
+When the awake window expires, Relay sends a sleep event to the glasses and closes CXR-L even if replyable inbox entries still exist. The glasses keep their local inbox visible. If you open an old inbox entry and tap reply while the phone is sleeping, the glasses send a small BLE wake request, the phone opens CXR-L, and the voice reply resumes once the link is back.
 
 ### Hi Rokid notification routing
 
@@ -385,6 +385,13 @@ Glasses to phone:
 
 ```text
 rokid_relay.command
+```
+
+Glasses to phone wake path:
+
+```text
+BLE GATT service 8b66f35d-7db2-4b3e-9ed4-5fbc5d6b4f01
+write wake_reply JSON to characteristic 8b66f35e-7db2-4b3e-9ed4-5fbc5d6b4f01
 ```
 
 Payload format:

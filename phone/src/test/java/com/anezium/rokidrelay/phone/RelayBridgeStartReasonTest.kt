@@ -47,6 +47,13 @@ class RelayBridgeStartReasonTest {
     }
 
     @Test
+    fun bleWakeReplyMayOpenHelperWithoutBecomingManualStart() {
+        assertTrue(isBleWakeReplyStart(RelayStarter.START_REASON_BLE_WAKE_REPLY))
+        assertTrue(allowsGlassesForegroundStart(RelayStarter.START_REASON_BLE_WAKE_REPLY))
+        assertFalse(isUserInitiatedRelayStart(RelayStarter.START_REASON_BLE_WAKE_REPLY))
+    }
+
+    @Test
     fun notificationSendCanUseLiveCxrLinkWhileForegroundLaunchIsPending() {
         assertTrue(
             canSendNotificationEvent(

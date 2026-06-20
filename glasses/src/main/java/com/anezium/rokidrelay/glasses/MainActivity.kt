@@ -1,7 +1,10 @@
 package com.anezium.rokidrelay.glasses
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.provider.Settings
@@ -27,6 +30,7 @@ class MainActivity : Activity() {
         RelayHudController.setNotificationFontSizeSp(NotificationOverlaySettings.fontSizeSp(this))
         RelayHudController.refreshAccessibility(this)
         RelayBridge.start(this)
+        requestBluetoothPermissionsIfNeeded()
     }
 
     override fun onResume() {
@@ -109,5 +113,20 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun requestBluetoothPermissionsIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        val missing = listOf(
+            Manifest.permission.BLUETOOTH_SCAN,
+            Manifest.permission.BLUETOOTH_CONNECT,
+        ).filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        if (missing.isNotEmpty()) {
+            requestPermissions(missing.toTypedArray(), BLUETOOTH_PERMISSION_REQUEST)
+        }
+    }
+
     private val inputInterpreter = RelayInputInterpreter()
+
+    companion object {
+        private const val BLUETOOTH_PERMISSION_REQUEST = 7202
+    }
 }

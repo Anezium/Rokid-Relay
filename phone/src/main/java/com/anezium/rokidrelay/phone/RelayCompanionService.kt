@@ -46,6 +46,7 @@ class RelayCompanionService : CompanionDeviceService() {
     private fun glassesPresent(source: String) {
         Log.i(TAG, "glasses present: $source")
         if (RelayStarter.isRelayEnabled(this)) {
+            BleWakeServer.ensureStarted(this)
             RelayBridge.setStatus("glasses present: relay armed")
         }
     }

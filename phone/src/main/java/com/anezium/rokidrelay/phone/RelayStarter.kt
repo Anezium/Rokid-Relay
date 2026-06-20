@@ -26,13 +26,16 @@ object RelayStarter {
     }
 
     fun arm(context: Context) {
-        setRelayEnabled(context.applicationContext, true)
-        RelayBridge.setStatus("relay armed: wake on notification")
+        val appContext = context.applicationContext
+        setRelayEnabled(appContext, true)
+        BleWakeServer.ensureStarted(appContext)
+        RelayBridge.setStatus("relay armed: wake on notification/reply")
     }
 
     fun armAndPrepare(context: Context, reason: String = START_REASON_MANUAL): Boolean {
         val appContext = context.applicationContext
         setRelayEnabled(appContext, true)
+        BleWakeServer.ensureStarted(appContext)
         val token = authToken(appContext)
         if (token.isNullOrBlank()) {
             RelayBridge.setStatus("relay armed: missing auth token")
@@ -47,12 +50,45 @@ object RelayStarter {
             RelayBridge.setStatus("notification ignored: relay disabled")
             return false
         }
+        BleWakeServer.ensureStarted(appContext)
         val token = authToken(appContext)
         if (token.isNullOrBlank()) {
             RelayBridge.setStatus("notification wake skipped: missing auth token")
             return false
         }
         return start(appContext, token, START_REASON_NOTIFICATION, persistEnabled = false)
+    }
+
+    fun wakeForBleReply(context: Context, notificationId: String): Boolean {
+        val appContext = context.applicationContext
+        if (!isRelayEnabled(appContext)) {
+            RelayBridge.setStatus("BLE wake ignored: relay disabled")
+            return false
+        }
+        val token = authToken(appContext)
+        if (token.isNullOrBlank()) {
+            RelayBridge.setStatus("BLE wake skipped: missing auth token")
+            return false
+        }
+        RelayBridge.setStatus("BLE wake: opening CXR-L")
+        val intent = Intent(appContext, RelayService::class.java)
+            .setAction(Constants.ACTION_START)
+            .putExtra(Constants.EXTRA_TOKEN, token)
+            .putExtra(Constants.EXTRA_START_REASON, START_REASON_BLE_WAKE_REPLY)
+            .putExtra(Constants.EXTRA_WAKE_NOTIFICATION_ID, notificationId)
+        return runCatching {
+            BleWakeServer.ensureStarted(appContext)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                appContext.startForegroundService(intent)
+            } else {
+                appContext.startService(intent)
+            }
+            true
+        }.getOrElse {
+            Log.w(TAG, "BLE wake start failed: ${it.message}")
+            RelayBridge.setStatus("BLE wake blocked")
+            false
+        }
     }
 
     fun start(context: Context, token: String, reason: String): Boolean =
@@ -66,6 +102,7 @@ object RelayStarter {
             .putExtra(Constants.EXTRA_START_REASON, reason)
         return runCatching {
             if (persistEnabled) setRelayEnabled(appContext, true)
+            if (isRelayEnabled(appContext)) BleWakeServer.ensureStarted(appContext)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 appContext.startForegroundService(intent)
             } else {
@@ -82,6 +119,7 @@ object RelayStarter {
 
     fun stop(context: Context) {
         setRelayEnabled(context.applicationContext, false)
+        BleWakeServer.stop()
         runCatching {
             context.applicationContext.startService(
                 Intent(context.applicationContext, RelayService::class.java)
@@ -112,6 +150,7 @@ object RelayStarter {
 
     const val START_REASON_MANUAL = "manual_start"
     const val START_REASON_NOTIFICATION = "notification_posted"
+    const val START_REASON_BLE_WAKE_REPLY = "ble_wake_reply"
 }
 
 internal fun isUserInitiatedRelayStart(reason: String): Boolean =
@@ -129,3 +168,6 @@ internal fun isUserInitiatedRelayStart(reason: String): Boolean =
 
 internal fun isNotificationWakeStart(reason: String): Boolean =
     reason == RelayStarter.START_REASON_NOTIFICATION
+
+internal fun isBleWakeReplyStart(reason: String): Boolean =
+    reason == RelayStarter.START_REASON_BLE_WAKE_REPLY

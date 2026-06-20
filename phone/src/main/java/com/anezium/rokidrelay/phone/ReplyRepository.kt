@@ -146,6 +146,9 @@ object ReplyRepository {
     fun hasPending(): Boolean =
         pending.isNotEmpty()
 
+    fun hasPending(notificationId: String): Boolean =
+        notificationId.isNotBlank() && pending.containsKey(notificationId)
+
     private fun isMostRecent(notificationId: String): Boolean =
         pending.values.maxByOrNull { it.capturedAtMs }?.id == notificationId
 

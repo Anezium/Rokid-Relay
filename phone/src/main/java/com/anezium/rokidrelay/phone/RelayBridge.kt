@@ -493,6 +493,9 @@ object RelayBridge {
                 if (id.isBlank() || localLink == null) {
                     sendReplyResult(id, false, "No active notification")
                 } else {
+                    if (!ReplyRepository.hasPending(id)) {
+                        NotificationControl.refreshActiveNotificationsNow()
+                    }
                     RelayService.cancelIdleStop()
                     VoiceController.start(context, localLink, id)
                 }
@@ -700,7 +703,7 @@ object RelayBridge {
 }
 
 internal fun allowsGlassesForegroundStart(reason: String): Boolean =
-    isUserInitiatedRelayStart(reason)
+    isUserInitiatedRelayStart(reason) || isBleWakeReplyStart(reason)
 
 internal fun canSendNotificationEvent(
     bootstrapReadyForMessages: Boolean,
