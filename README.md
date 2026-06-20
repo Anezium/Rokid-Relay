@@ -155,7 +155,7 @@ After the phone has a saved Hi Rokid token, notification access, and a ready STT
 
 The phone shows a foreground `Rokid Relay running` notification only while the relay is awake for a notification or reply window. Use the phone app `Stop` button or the foreground notification action to disarm it.
 
-When the awake window expires, the phone sends a sleep event to the glasses. The glasses inbox stays visible for review, but old inbox entries cannot wake the phone for replies; the next replyable notification wakes Relay again.
+When the awake window expires, Relay sleeps only if the phone has no pending replyable inbox entries. If old replyable entries still exist, CXR-L stays awake so the glasses inbox can still start a voice reply; once the inbox is empty, Relay sends a sleep event to the glasses and waits for the next replyable notification.
 
 ### Hi Rokid notification routing
 

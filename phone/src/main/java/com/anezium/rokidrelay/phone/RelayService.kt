@@ -18,6 +18,11 @@ import android.util.Log
 class RelayService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private val idleStopRunnable = Runnable {
+        if (ReplyRepository.hasPending()) {
+            RelayBridge.setStatus("relay awake: inbox replies available")
+            scheduleIdleStop(INBOX_PENDING_RECHECK_MS)
+            return@Runnable
+        }
         RelayBridge.notifySleeping("idle_timeout")
         handler.postDelayed({
             RelayBridge.setStatus("relay sleeping until next notification")
@@ -193,6 +198,7 @@ class RelayService : Service() {
         private const val CHANNEL_ID = "rokid_relay"
         private const val NOTIFICATION_ID = 7201
         private const val IDLE_STOP_DELAY_MS = 120_000L
+        private const val INBOX_PENDING_RECHECK_MS = 60_000L
         private const val SLEEP_EVENT_GRACE_MS = 750L
 
         fun setMicrophoneForegroundRequested(requested: Boolean): Boolean {

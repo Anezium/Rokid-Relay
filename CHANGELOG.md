@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.15-preview.4 - 2026-06-20
+
+- Kept CXR-L awake while the phone still has pending replyable inbox entries, so older glasses inbox items can still start voice reply after the original two-minute idle window.
+- Retained the glasses-side sleep fallback for cases where the phone link is genuinely unavailable.
+- Bumped the phone app to `0.1.15-preview.4` / `versionCode 19` and the bundled glasses helper to `0.1.10-preview.3` / `versionCode 13`.
+
 ## v0.1.15-preview.3 - 2026-06-20
 
 - Kept the glasses inbox visible when the phone enters wake-on-notification sleep.

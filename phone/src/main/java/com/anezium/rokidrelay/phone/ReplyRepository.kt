@@ -143,6 +143,9 @@ object ReplyRepository {
             .sortedByDescending { it.capturedAtMs }
             .take(limit.coerceAtLeast(1))
 
+    fun hasPending(): Boolean =
+        pending.isNotEmpty()
+
     private fun isMostRecent(notificationId: String): Boolean =
         pending.values.maxByOrNull { it.capturedAtMs }?.id == notificationId
 
