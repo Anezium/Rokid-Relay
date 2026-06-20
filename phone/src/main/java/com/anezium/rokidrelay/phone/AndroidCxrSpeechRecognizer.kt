@@ -52,6 +52,7 @@ class AndroidCxrSpeechRecognizer(
     private var finalResultTimeout: Runnable? = null
     private var inputClosed = false
     private var inputCloseReason = ""
+    private var microphoneForegroundRequested = false
 
     fun start(): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
@@ -66,14 +67,17 @@ class AndroidCxrSpeechRecognizer(
             failBeforeStart("Android speech recognition unavailable")
             return false
         }
-        RelayService.refreshForeground()
+        microphoneForegroundRequested = true
+        RelayService.setMicrophoneForegroundRequested(true)
         if (!RelayService.microphoneForegroundActive) {
             val detail = RelayService.lastMicrophoneForegroundError
             Log.w(TAG, "Microphone foreground unavailable: ${detail.ifBlank { "unknown" }}")
+            releaseMicrophoneForeground()
             failBeforeStart("Open phone app for Android CXR mic")
             return false
         }
         val readFd = startCxrAudioSource() ?: run {
+            releaseMicrophoneForeground()
             failBeforeStart("Glasses audio stream unavailable")
             return false
         }
@@ -308,7 +312,14 @@ class AndroidCxrSpeechRecognizer(
         recognizer = null
         runCatching { localRecognizer?.cancel() }
         runCatching { localRecognizer?.destroy() }
+        releaseMicrophoneForeground()
         afterCleanup()
+    }
+
+    private fun releaseMicrophoneForeground() {
+        if (!microphoneForegroundRequested) return
+        microphoneForegroundRequested = false
+        RelayService.setMicrophoneForegroundRequested(false)
     }
 
     private fun closeRecognizerInput(reason: String) {

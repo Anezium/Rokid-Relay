@@ -45,8 +45,9 @@ class RelayCompanionService : CompanionDeviceService() {
 
     private fun glassesPresent(source: String) {
         Log.i(TAG, "glasses present: $source")
-        RelayStarter.startIfReady(this, "glasses_present")
-        RelayService.refreshForeground()
+        if (RelayStarter.isRelayEnabled(this)) {
+            RelayBridge.setStatus("glasses present: relay armed")
+        }
     }
 
     companion object {

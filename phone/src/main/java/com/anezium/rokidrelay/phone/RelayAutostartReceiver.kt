@@ -14,8 +14,12 @@ class RelayAutostartReceiver : BroadcastReceiver() {
             Intent.ACTION_MY_PACKAGE_REPLACED,
             BluetoothDevice.ACTION_ACL_CONNECTED,
             -> {
+                if (!RelayStarter.isRelayEnabled(context)) {
+                    RelayBridge.setStatus("relay not started: disabled")
+                    return
+                }
                 CompanionDeviceCoordinator.startObserving(context)
-                RelayStarter.startIfReady(context, action.substringAfterLast('.'))
+                RelayBridge.setStatus("relay armed after ${action.substringAfterLast('.')}")
             }
 
             BluetoothAdapter.ACTION_STATE_CHANGED -> {
@@ -23,7 +27,9 @@ class RelayAutostartReceiver : BroadcastReceiver() {
                     intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR) ==
                     BluetoothAdapter.STATE_ON
                 ) {
-                    RelayStarter.startIfReady(context, "BLUETOOTH_ON")
+                    if (RelayStarter.isRelayEnabled(context)) {
+                        RelayBridge.setStatus("relay armed after BLUETOOTH_ON")
+                    }
                 }
             }
         }

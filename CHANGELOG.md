@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.1.15-preview.1 - 2026-06-20
+
+- Switched the phone relay to wake-on-notification mode: `Start` arms Relay, replyable notifications wake CXR, and the service sleeps again after the reply window.
+- Stopped boot, app update, Bluetooth reconnect, notification-listener connection, and normal app open from keeping CXR-L running continuously.
+- Kept microphone foreground mode limited to active Android CXR voice capture.
+- Increased disconnected CXR-L reconnect backoff to reduce idle retry churn.
+- Updated setup copy and docs to describe armed/asleep behavior.
+- Bumped the phone app to `0.1.15-preview.1` / `versionCode 16`; bundled glasses helper remains `0.1.9` / `versionCode 10`.
+
 ## v0.1.14 - 2026-06-14
 
 - Added opt-in notification image previews on the glasses HUD.

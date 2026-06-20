@@ -38,6 +38,7 @@ object Constants {
     const val PREF_STT_AZURE_LABEL = "stt_azure_label"
     const val PREF_STT_AZURE_REGION = "stt_azure_region"
     const val PREF_STT_LANGUAGE = "stt_language"
+    const val PREF_RELAY_ENABLED = "relay_enabled"
     const val PREF_NOTIFICATION_POPUP_DURATION_MS = "notification_popup_duration_ms"
     const val PREF_NOTIFICATION_FONT_SIZE_SP = "notification_font_size_sp"
     const val PREF_CLEAR_PHONE_NOTIFICATION_AFTER_REPLY = "clear_phone_notification_after_reply"

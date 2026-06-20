@@ -71,6 +71,7 @@ object VoiceController {
                 return@post
             }
             lastStartAtMs = now
+            RelayService.cancelIdleStop()
             this.appContext = appContext
             activeLink = link
             activeNotificationId = notificationId
@@ -406,6 +407,7 @@ object VoiceController {
             if (ok) "Reply sent" else "Reply failed",
         )
         RelayBridge.sendInbox()
+        RelayService.scheduleIdleStop()
     }
 
     private fun stopVoiceInputForReview() {
@@ -526,6 +528,7 @@ object VoiceController {
         activeNotificationId = ""
         RelayBridge.recordVoiceIdle(if (sendIdle) "idle" else "done")
         if (sendIdle) RelayBridge.sendVoiceState("idle")
+        RelayService.scheduleIdleStop()
     }
 
     private fun Throwable.voiceMessage(): String =

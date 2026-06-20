@@ -127,7 +127,7 @@ Install the phone app on the Android phone:
 adb install -r phone/build/outputs/apk/debug/phone-debug.apk
 ```
 
-Usually the phone app deploys and starts the glasses helper automatically after Hi Rokid authorization while the phone app is open, so a normal first install only needs the phone APK. Background starts from boot or Bluetooth reconnect keep the relay ready without opening the glasses app. For direct glasses debugging, install the glasses APK manually:
+Usually the phone app deploys and starts the glasses helper when you press `Start` after Hi Rokid authorization, so a normal first install only needs the phone APK. In normal use the phone service stays armed and wakes only when a replyable notification arrives. For direct glasses debugging, install the glasses APK manually:
 
 ```powershell
 adb install -r glasses/build/outputs/apk/debug/glasses-debug.apk
@@ -151,9 +151,9 @@ Do not publish local APKs built with private credentials, local tokens, or debug
 10. Enable `Rokid Relay overlay` in Accessibility on the glasses.
 11. Return to the glasses app. The setup screen should show `ACCESSIBILITY ON`.
 
-After the phone has a saved Hi Rokid token, notification access, and a ready STT engine, the relay starts automatically when the app opens and on supported Android events such as boot, app update, Bluetooth reconnect, and notification-listener connection.
+After the phone has a saved Hi Rokid token, notification access, and a ready STT engine, tap `Start` once to arm wake-on-notification. Boot, app update, Bluetooth reconnect, and notification-listener connection keep the app armed but do not keep CXR running.
 
-The phone keeps a foreground `Rokid Relay running` notification while relay mode is active. Use the phone app `Stop` button or the foreground notification action to stop it.
+The phone shows a foreground `Rokid Relay running` notification only while the relay is awake for a notification or reply window. Use the phone app `Stop` button or the foreground notification action to disarm it.
 
 ### Hi Rokid notification routing
 

@@ -10,10 +10,20 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.util.Log
 
 class RelayService : Service() {
+    private val handler = Handler(Looper.getMainLooper())
+    private val idleStopRunnable = Runnable {
+        RelayBridge.setStatus("relay sleeping until next notification")
+        RelayBridge.stop()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
     override fun onCreate() {
         super.onCreate()
         instance = this
@@ -25,11 +35,21 @@ class RelayService : Service() {
         startForegroundCompat()
         when (intent?.action) {
             Constants.ACTION_STOP -> {
+                RelayStarter.setRelayEnabled(this, false)
+                microphoneForegroundRequested = false
+                cancelIdleStop()
                 RelayBridge.stop()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
+                return START_NOT_STICKY
             }
             else -> {
+                if (!RelayStarter.isRelayEnabled(this)) {
+                    RelayBridge.setStatus("relay not started: disabled")
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf(startId)
+                    return START_NOT_STICKY
+                }
                 val token = intent?.getStringExtra(Constants.EXTRA_TOKEN)
                     ?: getSharedPreferences(Constants.PREFS, MODE_PRIVATE)
                         .getString(Constants.PREF_AUTH_TOKEN, null)
@@ -37,18 +57,24 @@ class RelayService : Service() {
                 if (!token.isNullOrBlank()) {
                     if (reason.isNotBlank()) RelayBridge.setStatus("relay started: $reason")
                     RelayBridge.start(applicationContext, token, reason)
+                    scheduleIdleStop()
                 } else {
                     RelayBridge.setStatus("missing auth token")
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf(startId)
+                    return START_NOT_STICKY
                 }
             }
         }
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     override fun onDestroy() {
+        cancelIdleStop()
         RelayBridge.stop()
         running = false
         microphoneForegroundActive = false
+        microphoneForegroundRequested = false
         lastMicrophoneForegroundError = "Relay service stopped"
         if (instance === this) instance = null
         super.onDestroy()
@@ -100,6 +126,7 @@ class RelayService : Service() {
     }
 
     private fun shouldRequestMicrophoneForeground(): Boolean {
+        if (!microphoneForegroundRequested) return false
         val selected = SpeechToTextSettingsStore(this).selectedEngine()
         return selected.requiresMicrophonePermission &&
             checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
@@ -137,6 +164,15 @@ class RelayService : Service() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 
+    private fun scheduleIdleStop(delayMs: Long = IDLE_STOP_DELAY_MS) {
+        handler.removeCallbacks(idleStopRunnable)
+        handler.postDelayed(idleStopRunnable, delayMs)
+    }
+
+    private fun cancelIdleStop() {
+        handler.removeCallbacks(idleStopRunnable)
+    }
+
     companion object {
         @Volatile var running: Boolean = false
             private set
@@ -148,10 +184,25 @@ class RelayService : Service() {
             private set
 
         @Volatile private var instance: RelayService? = null
+        @Volatile private var microphoneForegroundRequested: Boolean = false
 
         private const val TAG = "RelayService"
         private const val CHANNEL_ID = "rokid_relay"
         private const val NOTIFICATION_ID = 7201
+        private const val IDLE_STOP_DELAY_MS = 120_000L
+
+        fun setMicrophoneForegroundRequested(requested: Boolean): Boolean {
+            microphoneForegroundRequested = requested
+            return refreshForeground()
+        }
+
+        fun scheduleIdleStop(delayMs: Long = IDLE_STOP_DELAY_MS) {
+            instance?.scheduleIdleStop(delayMs)
+        }
+
+        fun cancelIdleStop() {
+            instance?.cancelIdleStop()
+        }
 
         fun refreshForeground(): Boolean {
             val service = instance

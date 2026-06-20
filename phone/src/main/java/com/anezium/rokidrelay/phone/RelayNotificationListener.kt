@@ -9,16 +9,18 @@ class RelayNotificationListener : NotificationListenerService() {
         super.onListenerConnected()
         NotificationControl.attach(this)
         RelayBridge.setStatus("notification listener connected")
-        RelayStarter.startIfReady(this, "notification_listener")
-        syncActiveNotifications()
+        if (RelayStarter.isRelayEnabled(this) && RelayService.running) {
+            syncActiveNotifications()
+        }
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         sbn ?: return
+        if (!RelayStarter.isRelayEnabled(this)) return
         if (NotificationForwardingPolicy.isPaused(this)) {
             Log.i(TAG, "posted pkg=${sbn.packageName} skipped=phone_screen_on")
             RelayBridge.setStatus("notification forwarding paused: phone screen on")
-            RelayBridge.sendInbox()
+            if (RelayService.running) RelayBridge.sendInbox()
             return
         }
         val capture = ReplyRepository.capture(this, sbn) ?: return
@@ -27,18 +29,20 @@ class RelayNotificationListener : NotificationListenerService() {
             "posted pkg=${sbn.packageName} id=${capture.reply.id.take(8)} show=${capture.shouldShowNow}",
         )
         if (capture.shouldShowNow) {
-            RelayBridge.setStatus("replyable notification from ${capture.reply.appLabel}")
+            RelayBridge.setStatus("notification wake: ${capture.reply.appLabel}")
             RelayBridge.sendNotification(capture.reply)
+            RelayStarter.wakeForNotification(this)
         } else {
-            RelayBridge.sendInbox()
+            if (RelayService.running) RelayBridge.sendInbox()
         }
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
         sbn ?: return
+        if (!RelayStarter.isRelayEnabled(this)) return
         Log.i(TAG, "removed pkg=${sbn.packageName}")
         ReplyRepository.forgetStatusBarNotification(sbn)
-        RelayBridge.sendInbox()
+        if (RelayService.running) RelayBridge.sendInbox()
     }
 
     override fun onListenerDisconnected() {

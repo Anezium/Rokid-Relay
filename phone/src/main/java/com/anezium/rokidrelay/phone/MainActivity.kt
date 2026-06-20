@@ -96,8 +96,8 @@ class MainActivity : Activity() {
 
     private var runtimePermissionRequestInFlight = false
     private var authRequestInFlight = false
-    private var autoAuthAttempted = false
     private var autoReauthAttempted = false
+    private var armRelayAfterAuth = false
     private var apiKeysVisible = false
     private var selectedTab = AppTab.HOME
     private var modernBackCallback: OnBackInvokedCallback? = null
@@ -130,13 +130,16 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         if (!runtimePermissionRequestInFlight) {
-            autoStartOrAuthorize("app_open")
-            CompanionDeviceCoordinator.startObserving(this)
-            RelayService.refreshForeground()
-            handler.postDelayed({
+            if (RelayStarter.isRelayEnabled(this)) {
+                CompanionDeviceCoordinator.startObserving(this)
+            }
+            if (RelayService.running) {
                 RelayService.refreshForeground()
-                renderStatus()
-            }, FOREGROUND_REFRESH_DELAY_MS)
+                handler.postDelayed({
+                    RelayService.refreshForeground()
+                    renderStatus()
+                }, FOREGROUND_REFRESH_DELAY_MS)
+            }
         }
         renderStatus()
         handler.post(pollStatus)
@@ -160,8 +163,8 @@ class MainActivity : Activity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         runtimePermissionRequestInFlight = false
-        autoStartOrAuthorize("permissions")
-        RelayService.refreshForeground()
+        syncSettingsAfterUserChange()
+        if (RelayService.running) RelayService.refreshForeground()
         renderStatus()
     }
 
@@ -181,13 +184,24 @@ class MainActivity : Activity() {
         }
         if (requestCode != Constants.AUTH_REQUEST_CODE) return
         authRequestInFlight = false
+        val shouldArmRelay = armRelayAfterAuth
+        armRelayAfterAuth = false
 
         val notice = when (val result = CxrLAuth.parseAuthorizationResult(resultCode, data)) {
             is CxrLAuth.Result.Success -> {
                 prefs().edit().putString(Constants.PREF_AUTH_TOKEN, result.token).apply()
                 autoReauthAttempted = false
-                RelayStarter.start(this, result.token, "authorization")
-                "Hi Rokid authorized"
+                when {
+                    shouldArmRelay -> {
+                        RelayStarter.armAndPrepare(this, RelayStarter.START_REASON_MANUAL)
+                        "Hi Rokid authorized. Relay armed."
+                    }
+                    RelayService.running -> {
+                        RelayStarter.start(this, result.token, "authorization")
+                        "Hi Rokid authorized"
+                    }
+                    else -> "Hi Rokid authorized"
+                }
             }
             is CxrLAuth.Result.Fail -> "Authorization failed: ${result.reason}"
             is CxrLAuth.Result.Cancel -> "Authorization cancelled"
@@ -621,7 +635,7 @@ class MainActivity : Activity() {
                     if (store.selectedEngine() != next) {
                         store.saveSelectedEngine(next)
                         if (next.requiresMicrophonePermission) requestMicrophonePermissionIfNeeded()
-                        autoStartOrAuthorize("stt_engine")
+                        syncSettingsAfterUserChange()
                         renderStatus()
                     }
                 }
@@ -646,7 +660,7 @@ class MainActivity : Activity() {
                     val store = SpeechToTextSettingsStore(this@MainActivity)
                     if (store.selectedEngine() != next) {
                         store.saveSelectedEngine(next)
-                        autoStartOrAuthorize("stt_provider")
+                        syncSettingsAfterUserChange()
                         renderStatus()
                     }
                 }
@@ -666,7 +680,7 @@ class MainActivity : Activity() {
                 val store = SpeechToTextSettingsStore(this@MainActivity)
                 if (store.selectedEngine() != selectedEngine) {
                     store.saveSelectedEngine(selectedEngine)
-                    autoStartOrAuthorize("stt_model")
+                    syncSettingsAfterUserChange()
                     renderStatus()
                 }
             }
@@ -1040,7 +1054,7 @@ class MainActivity : Activity() {
                 actionTone = ButtonTone.Secondary,
                 onClick = {
                     requestMicrophonePermissionIfNeeded()
-                    autoStartOrAuthorize("microphone_permission")
+                    syncSettingsAfterUserChange()
                     renderStatus()
                 },
             ), matchWrap(top = 8))
@@ -1064,14 +1078,24 @@ class MainActivity : Activity() {
                 actionTone = ButtonTone.Secondary,
                 onClick = { openBatterySettings() },
             ), matchWrap(top = 8))
+            val relayEnabled = RelayStarter.isRelayEnabled(this)
+            val relayRunning = RelayService.running
             setupRows.addView(setupRow(
                 title = "Relay service",
-                value = if (RelayService.running) "Forwarding notifications" else "Stopped",
-                tone = if (RelayService.running) StatusTone.Ready else StatusTone.Neutral,
-                actionLabel = "Stop",
-                actionTone = ButtonTone.Danger,
+                value = when {
+                    relayRunning -> "Awake for notification"
+                    relayEnabled -> "Armed for notifications"
+                    else -> "Stopped"
+                },
+                tone = if (relayRunning) StatusTone.Ready else StatusTone.Neutral,
+                actionLabel = if (relayRunning || relayEnabled) "Stop" else "Start",
+                actionTone = if (relayRunning || relayEnabled) ButtonTone.Danger else ButtonTone.Primary,
                 onClick = {
-                    RelayStarter.stop(this)
+                    if (relayRunning || relayEnabled) {
+                        RelayStarter.stop(this)
+                    } else {
+                        armRelayOrAuthorize()
+                    }
                     renderStatus()
                 },
             ), matchWrap(top = 8))
@@ -1088,8 +1112,9 @@ class MainActivity : Activity() {
                 !batteryUnrestricted -> "Ready. Set battery to Unrestricted for best reliability."
                 RelayService.running && NotificationForwardingPolicy.isPaused(this) ->
                     "Ready. Forwarding is paused while this screen is on."
-                RelayService.running -> "Ready. Replyable notifications will forward to the glasses."
-                else -> "Ready to start."
+                RelayService.running -> "Awake. Relay will sleep again after the reply window."
+                RelayStarter.isRelayEnabled(this) -> "Armed. Relay wakes only when a replyable notification arrives."
+                else -> "Ready to arm wake-on-notification."
             }
             noticeText.setTextColor(if (hiRokid && authSaved && notifications && sttReady) COLOR_PHOSPHOR else COLOR_MUTED)
         }
@@ -1821,13 +1846,26 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun autoStartOrAuthorize(reason: String) {
-        if (RelayStarter.startIfReady(this, reason)) return
-        if (!autoAuthAttempted) {
-            autoAuthAttempted = true
-            requestHiRokidAuthorization(auto = true, reason = reason)
+    private fun armRelayOrAuthorize() {
+        if (savedAuthToken().isNullOrBlank()) {
+            armRelayAfterAuth = true
+            requestHiRokidAuthorization(auto = false, reason = RelayStarter.START_REASON_MANUAL)
+            return
+        }
+        RelayStarter.armAndPrepare(this, RelayStarter.START_REASON_MANUAL)
+        CompanionDeviceCoordinator.startObserving(this)
+    }
+
+    private fun syncSettingsAfterUserChange() {
+        if (RelayService.running) {
+            RelayBridge.sendSettings()
+        } else if (RelayStarter.isRelayEnabled(this)) {
+            RelayBridge.setStatus("settings saved: will sync on notification wake")
         }
     }
+
+    private fun savedAuthToken(): String? =
+        prefs().getString(Constants.PREF_AUTH_TOKEN, null)
 
     private fun maybeAutoReauthorizeAfterBindFailure(snap: RelayBridge.Snapshot, authSaved: Boolean) {
         if (!authSaved || autoReauthAttempted || authRequestInFlight) return
@@ -1840,6 +1878,7 @@ class MainActivity : Activity() {
     private fun requestHiRokidAuthorization(auto: Boolean, reason: String) {
         if (authRequestInFlight) return
         if (!CxrLAuth.isGlobalHiRokidInstalled(this)) {
+            if (reason == RelayStarter.START_REASON_MANUAL) armRelayAfterAuth = false
             toastLine("Hi Rokid Global is not visible to Rokid Relay")
             return
         }
@@ -1848,6 +1887,7 @@ class MainActivity : Activity() {
         val error = CxrLAuth.requestAuthorization(this, Constants.AUTH_REQUEST_CODE)
         if (error is CxrLAuth.Result.Fail) {
             authRequestInFlight = false
+            if (reason == RelayStarter.START_REASON_MANUAL) armRelayAfterAuth = false
             toastLine("Authorization failed to open: ${error.reason}")
             RelayBridge.setStatus("authorization failed to open: $reason")
         }

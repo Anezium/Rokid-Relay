@@ -32,7 +32,7 @@ object RelayBridge {
 
     private const val TAG = "RokidRelayBridge"
     private const val RECONNECT_INITIAL_DELAY_MS = 1_000L
-    private const val RECONNECT_MAX_DELAY_MS = 15_000L
+    private const val RECONNECT_MAX_DELAY_MS = 120_000L
     private const val FOREGROUND_OPEN_WINDOW_MS = 30_000L
     private val main = Handler(Looper.getMainLooper())
 
@@ -178,6 +178,7 @@ object RelayBridge {
         if (sendJson(Constants.KEY_EVENT, json)) {
             if (pendingNotificationRetry?.id == reply.id) pendingNotificationRetry = null
             sendNotificationImage(reply)
+            RelayService.scheduleIdleStop()
         } else {
             pendingNotificationRetry = reply
         }
@@ -481,6 +482,7 @@ object RelayBridge {
                 if (id.isBlank() || localLink == null) {
                     sendReplyResult(id, false, "No active notification")
                 } else {
+                    RelayService.cancelIdleStop()
                     VoiceController.start(context, localLink, id)
                 }
             }
@@ -490,10 +492,14 @@ object RelayBridge {
                 if (id.isBlank() || localLink == null) {
                     sendReplyResult(id, false, "No active notification")
                 } else {
+                    RelayService.cancelIdleStop()
                     VoiceController.retry(context, localLink, id)
                 }
             }
-            "cancel_voice" -> VoiceController.cancel()
+            "cancel_voice" -> {
+                VoiceController.cancel()
+                RelayService.scheduleIdleStop()
+            }
             "dismiss_notification" -> {
                 val id = json.optString("notificationId")
                 ReplyRepository.forget(id)
@@ -505,6 +511,7 @@ object RelayBridge {
                         .put("source", "phone"),
                 )
                 sendInbox()
+                RelayService.scheduleIdleStop()
             }
         }
     }
@@ -670,17 +677,7 @@ object RelayBridge {
 }
 
 internal fun allowsGlassesForegroundStart(reason: String): Boolean =
-    when (reason) {
-        "app_open",
-        "authorization",
-        "permissions",
-        "stt_engine",
-        "stt_provider",
-        "stt_model",
-        "microphone_permission",
-        -> true
-        else -> false
-    }
+    isUserInitiatedRelayStart(reason)
 
 internal fun canSendNotificationEvent(
     bootstrapReadyForMessages: Boolean,

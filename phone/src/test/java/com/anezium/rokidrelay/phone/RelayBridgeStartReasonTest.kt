@@ -8,7 +8,7 @@ class RelayBridgeStartReasonTest {
     @Test
     fun interactiveReasonsMayOpenGlassesHelperAfterInstall() {
         listOf(
-            "app_open",
+            RelayStarter.START_REASON_MANUAL,
             "authorization",
             "permissions",
             "stt_engine",
@@ -17,6 +17,7 @@ class RelayBridgeStartReasonTest {
             "microphone_permission",
         ).forEach { reason ->
             assertTrue("Expected $reason to allow foreground start", allowsGlassesForegroundStart(reason))
+            assertTrue("Expected $reason to be user initiated", isUserInitiatedRelayStart(reason))
         }
     }
 
@@ -28,11 +29,21 @@ class RelayBridgeStartReasonTest {
             "ACL_CONNECTED",
             "BLUETOOTH_ON",
             "glasses_present",
+            "app_open",
             "notification_listener",
+            RelayStarter.START_REASON_NOTIFICATION,
             "",
         ).forEach { reason ->
             assertFalse("Expected $reason to stay background", allowsGlassesForegroundStart(reason))
+            assertFalse("Expected $reason to stay passive", isUserInitiatedRelayStart(reason))
         }
+    }
+
+    @Test
+    fun notificationReasonIsWakeOnly() {
+        assertTrue(isNotificationWakeStart(RelayStarter.START_REASON_NOTIFICATION))
+        assertFalse(allowsGlassesForegroundStart(RelayStarter.START_REASON_NOTIFICATION))
+        assertFalse(isUserInitiatedRelayStart(RelayStarter.START_REASON_NOTIFICATION))
     }
 
     @Test
