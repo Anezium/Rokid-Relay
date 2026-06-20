@@ -350,7 +350,13 @@ class RelayHudView(
             hideInboxRows()
             titleLabel.text = "Inbox"
             applyMessageText(
-                text = "No replyable notifications",
+                text = transientLine.ifBlank {
+                    if (connection == "sleeping") {
+                        "Phone sleeping. Wait for next notification."
+                    } else {
+                        "No replyable notifications"
+                    }
+                },
                 mode = MessageBodyMode.EMPTY_INBOX,
                 textSizeSp = notificationFontSizeSp,
             )

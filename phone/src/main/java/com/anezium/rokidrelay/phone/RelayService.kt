@@ -18,10 +18,13 @@ import android.util.Log
 class RelayService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private val idleStopRunnable = Runnable {
-        RelayBridge.setStatus("relay sleeping until next notification")
-        RelayBridge.stop()
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
+        RelayBridge.notifySleeping("idle_timeout")
+        handler.postDelayed({
+            RelayBridge.setStatus("relay sleeping until next notification")
+            RelayBridge.stop()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+        }, SLEEP_EVENT_GRACE_MS)
     }
 
     override fun onCreate() {
@@ -190,6 +193,7 @@ class RelayService : Service() {
         private const val CHANNEL_ID = "rokid_relay"
         private const val NOTIFICATION_ID = 7201
         private const val IDLE_STOP_DELAY_MS = 120_000L
+        private const val SLEEP_EVENT_GRACE_MS = 750L
 
         fun setMicrophoneForegroundRequested(requested: Boolean): Boolean {
             microphoneForegroundRequested = requested

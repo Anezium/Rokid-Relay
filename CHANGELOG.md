@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.15-preview.2 - 2026-06-20
+
+- Added a `phone_sleeping` event before the phone service disconnects CXR-L.
+- Updated the glasses helper so stale inbox entries are cleared when the phone sleeps, and reply controls no longer optimistically enter voice mode after the link is gone.
+- Bumped the phone app to `0.1.15-preview.2` / `versionCode 17` and the bundled glasses helper to `0.1.10-preview.1` / `versionCode 11`.
+
 ## v0.1.15-preview.1 - 2026-06-20
 
 - Switched the phone relay to wake-on-notification mode: `Start` arms Relay, replyable notifications wake CXR, and the service sleeps again after the reply window.

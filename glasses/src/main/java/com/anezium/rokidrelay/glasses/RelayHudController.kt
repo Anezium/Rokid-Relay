@@ -102,6 +102,33 @@ object RelayHudController {
         update { copy(connection = value) }
     }
 
+    fun isPhoneConnected(): Boolean =
+        state.connection == "connected"
+
+    fun phoneSleeping() {
+        cancelNotificationAutoHide()
+        cancelEmptyInboxAutoHide()
+        update {
+            copy(
+                connection = "sleeping",
+                notification = null,
+                notificationPage = 0,
+                inbox = emptyList(),
+                inboxVisible = inboxVisible,
+                inboxDetail = false,
+                inboxIndex = 0,
+                inboxDetailPage = 0,
+                voiceState = "idle",
+                voicePartial = "",
+                countdownMs = 0L,
+                countdownTotalMs = 0L,
+                resultLine = "",
+                replyOk = false,
+                transientLine = "Phone sleeping. Wait for next notification.",
+            )
+        }
+    }
+
     fun showNotification(model: RelayHudView.NotificationModel) {
         runOnMain {
             cancelEmptyInboxAutoHide()

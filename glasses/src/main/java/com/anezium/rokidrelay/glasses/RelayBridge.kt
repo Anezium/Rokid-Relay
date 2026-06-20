@@ -40,6 +40,11 @@ object RelayBridge {
     }
 
     fun startVoice() {
+        if (!RelayHudController.isPhoneConnected()) {
+            RelayHudController.showTransient("Phone sleeping. Wait for next notification.")
+            RelayHudController.setVoice("idle", "")
+            return
+        }
         val notification = RelayHudController.currentNotificationId()
         if (notification.isBlank()) {
             RelayHudController.showTransient("No replyable notification")
@@ -154,6 +159,7 @@ object RelayBridge {
                     if (obj.optBoolean("glassConnected")) "connected" else "waiting",
                 )
             }
+            "phone_sleeping" -> RelayHudController.phoneSleeping()
             "settings" -> applySettings(obj)
             "notification" -> {
                 applySettings(obj)

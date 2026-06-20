@@ -273,6 +273,17 @@ object RelayBridge {
         )
     }
 
+    fun notifySleeping(reason: String) {
+        sendJsonBestEffort(
+            Constants.KEY_EVENT,
+            JSONObject()
+                .put("version", Constants.PROTOCOL_VERSION)
+                .put("type", "phone_sleeping")
+                .put("source", "phone")
+                .put("reason", reason),
+        )
+    }
+
     private fun startOnMain(context: Context, token: String, allowForegroundOpen: Boolean = false) {
         authToken = token
         val localLink = ensureLink(context)
@@ -626,6 +637,18 @@ object RelayBridge {
         }.getOrElse {
             Log.w(TAG, "send failed: ${it.message}")
             markSendUnavailable("send exception", key, json)
+            false
+        }
+    }
+
+    private fun sendJsonBestEffort(key: String, json: JSONObject): Boolean {
+        val localLink = link ?: return false
+        return runCatching {
+            val bytes = Caps().apply { write(json.toString()) }.serialize()
+            val result = localLink.sendCustomCmd(key, bytes)
+            result != null && result >= 0
+        }.getOrElse {
+            Log.w(TAG, "best-effort send failed key=$key type=${json.optString("type")}: ${it.message}")
             false
         }
     }

@@ -155,6 +155,8 @@ After the phone has a saved Hi Rokid token, notification access, and a ready STT
 
 The phone shows a foreground `Rokid Relay running` notification only while the relay is awake for a notification or reply window. Use the phone app `Stop` button or the foreground notification action to disarm it.
 
+When the awake window expires, the phone sends a sleep event to the glasses and clears the glasses-side reply inbox. Old glasses inbox entries cannot wake the phone; the next replyable notification wakes Relay again.
+
 ### Hi Rokid notification routing
 
 Rokid Relay does not currently suppress or coordinate with Hi Rokid's own notification mirroring. If Hi Rokid is also forwarding the same phone notifications to the glasses, you may see duplicate notification UI: one from Hi Rokid and one from Rokid Relay.
