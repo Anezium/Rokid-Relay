@@ -109,15 +109,19 @@ object RelayHudController {
         cancelNotificationAutoHide()
         cancelEmptyInboxAutoHide()
         update {
+            val selectedIndex = if (inbox.isEmpty()) 0 else inboxIndex.coerceIn(0, inbox.lastIndex)
+            val selectedPage = if (inbox.isEmpty() || !inboxDetail) {
+                0
+            } else {
+                val selectedPageCount = pageCount(inbox[selectedIndex], notificationFontSizeSp).coerceAtLeast(1)
+                inboxDetailPage.coerceIn(0, selectedPageCount - 1)
+            }
             copy(
                 connection = "sleeping",
                 notification = null,
                 notificationPage = 0,
-                inbox = emptyList(),
-                inboxVisible = inboxVisible,
-                inboxDetail = false,
-                inboxIndex = 0,
-                inboxDetailPage = 0,
+                inboxIndex = selectedIndex,
+                inboxDetailPage = selectedPage,
                 voiceState = "idle",
                 voicePartial = "",
                 countdownMs = 0L,

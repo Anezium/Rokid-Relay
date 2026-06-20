@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.15-preview.3 - 2026-06-20
+
+- Kept the glasses inbox visible when the phone enters wake-on-notification sleep.
+- Marked sleeping inbox state in the HUD and blocked reply start until the next notification wakes the phone link.
+- Bumped the phone app to `0.1.15-preview.3` / `versionCode 18` and the bundled glasses helper to `0.1.10-preview.2` / `versionCode 12`.
+
 ## v0.1.15-preview.2 - 2026-06-20
 
 - Added a `phone_sleeping` event before the phone service disconnects CXR-L.

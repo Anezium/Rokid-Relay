@@ -382,9 +382,18 @@ class RelayHudView(
             return
         }
 
-        titleLabel.text = "Inbox ${selectedIndex + 1}/${inbox.size}"
+        titleLabel.text = if (connection == "sleeping") {
+            "Inbox ${selectedIndex + 1}/${inbox.size} - sleeping"
+        } else {
+            "Inbox ${selectedIndex + 1}/${inbox.size}"
+        }
         messageLabel.visibility = GONE
-        hintLabel.visibility = GONE
+        val sleepingHint = connection == "sleeping"
+        hintLabel.text = if (sleepingHint) "Replies resume on next notification" else ""
+        hintLabel.visibility = if (sleepingHint) VISIBLE else GONE
+        hintLabel.alpha = 1f
+        hintLabel.translationY = 0f
+        hintLabel.setTextColor(DIM)
 
         val start = when {
             inbox.size <= inboxRows.size -> 0
@@ -412,7 +421,13 @@ class RelayHudView(
     private fun renderPageHint(pageIndex: Int, pageCount: Int) {
         if (voiceState != "idle" || resultLine.isNotBlank()) return
         val hint = transientLine.ifBlank {
-            if (pageCount > 1) "Page ${pageIndex + 1}/${pageCount}" else ""
+            if (connection == "sleeping") {
+                "Replies resume on next notification"
+            } else if (pageCount > 1) {
+                "Page ${pageIndex + 1}/${pageCount}"
+            } else {
+                ""
+            }
         }
         hintLabel.text = hint
         hintLabel.visibility = if (hint.isBlank()) GONE else VISIBLE
