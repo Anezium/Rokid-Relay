@@ -12,7 +12,7 @@ import org.json.JSONObject
 object RelayBridge {
     private const val TAG = "RelayBridge"
     private const val VOICE_COMMAND_DEBOUNCE_MS = 900L
-    private const val WAKE_REPLY_TIMEOUT_MS = 15_000L
+    private const val WAKE_REPLY_TIMEOUT_MS = 20_000L
 
     private val main = Handler(Looper.getMainLooper())
     private var bridge: CXRServiceBridge? = null

@@ -59,10 +59,13 @@ class RelayService : Service() {
                     ?: getSharedPreferences(Constants.PREFS, MODE_PRIVATE)
                         .getString(Constants.PREF_AUTH_TOKEN, null)
                 val reason = intent?.getStringExtra(Constants.EXTRA_START_REASON).orEmpty()
+                val wakeNotificationId = intent
+                    ?.getStringExtra(Constants.EXTRA_WAKE_NOTIFICATION_ID)
+                    .orEmpty()
                 if (!token.isNullOrBlank()) {
                     if (reason.isNotBlank()) RelayBridge.setStatus("relay started: $reason")
                     BleWakeServer.ensureStarted(this)
-                    RelayBridge.start(applicationContext, token, reason)
+                    RelayBridge.start(applicationContext, token, reason, wakeNotificationId)
                     scheduleIdleStop()
                 } else {
                     RelayBridge.setStatus("missing auth token")

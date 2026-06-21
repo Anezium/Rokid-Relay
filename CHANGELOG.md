@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.15-preview.6 - 2026-06-21
+
+- Added Android speech recognition service visibility so `Android CXR` can reliably discover the phone speech engine on Android 11+ target builds.
+- Blocked `Android CXR` setup when the phone is below Android 13, the microphone permission is missing, or Android 14+ lacks the Companion Device link required for background microphone foreground service access.
+- Preserved the BLE wake reply `notificationId` on the phone and automatically started voice capture once CXR-L and the glasses helper are ready, even if the glasses-side retry window is slow.
+- Increased the Android CXR first-audio wait window and set the glasses BLE wake reply timeout to 20 seconds to tolerate slower just-woken CXR-L audio startup without making the user wait too long.
+- Bumped the phone app to `0.1.15-preview.6` / `versionCode 21` and the bundled glasses helper to `0.1.10-preview.5` / `versionCode 15`.
+
 ## v0.1.15-preview.5 - 2026-06-20
 
 - Replaced the `preview.4` pending-inbox CXR-L keepalive with a BLE wake bridge.

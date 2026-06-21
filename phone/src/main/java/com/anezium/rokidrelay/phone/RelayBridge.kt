@@ -56,6 +56,7 @@ object RelayBridge {
     @Volatile private var bootstrapOpenClientDeadlineMs = 0L
     @Volatile private var authToken = ""
     @Volatile private var pendingNotificationRetry: ReplyRepository.PendingReply? = null
+    @Volatile private var pendingWakeVoiceNotificationId = ""
     @Volatile private var reconnectRunnable: Runnable? = null
     @Volatile private var foregroundOpenRunnable: Runnable? = null
     private var reconnectDelayMs = RECONNECT_INITIAL_DELAY_MS
@@ -63,9 +64,17 @@ object RelayBridge {
     private var appContext: Context? = null
     private var link: CXRLink? = null
 
-    fun start(context: Context, token: String, reason: String = "") {
+    fun start(
+        context: Context,
+        token: String,
+        reason: String = "",
+        wakeNotificationId: String = "",
+    ) {
         appContext = context.applicationContext
         authToken = token
+        if (wakeNotificationId.isNotBlank()) {
+            pendingWakeVoiceNotificationId = wakeNotificationId
+        }
         val allowForegroundOpen = allowsGlassesForegroundStart(reason)
         setForegroundOpenRequest(allowForegroundOpen)
         main.post {
@@ -89,6 +98,7 @@ object RelayBridge {
             clearForegroundOpenRequest()
             bootstrapState = "stopped"
             lastStatus = "stopped"
+            pendingWakeVoiceNotificationId = ""
         }
     }
 
@@ -432,6 +442,7 @@ object RelayBridge {
                 bootstrapReadyForMessages = false
             } else if (bootstrapReadyForMessages) {
                 flushPendingNotification()
+                maybeStartPendingWakeVoice()
                 return
             } else {
                 if (foregroundOpenRequestActive()) scheduleForegroundOpenAttempt()
@@ -464,6 +475,7 @@ object RelayBridge {
                 main.post { maybeBootstrap(allowForegroundOpen = true) }
             } else if (result.success && result.readyForMessages) {
                 flushPendingNotification()
+                maybeStartPendingWakeVoice()
             }
         }.apply {
             name = "RokidRelayBootstrap"
@@ -477,6 +489,21 @@ object RelayBridge {
         pendingNotificationRetry = null
         Log.i(TAG, "retrying pending notification id=${pending.id.take(8)}")
         sendNotification(pending)
+    }
+
+    private fun maybeStartPendingWakeVoice() {
+        val notificationId = pendingWakeVoiceNotificationId
+        val context = appContext
+        val localLink = link
+        if (notificationId.isBlank() || context == null || localLink == null) return
+        if (!bootstrapReadyForMessages || !cxrConnected || !glassConnected || !localLink.isServiceConnected()) return
+        pendingWakeVoiceNotificationId = ""
+        if (!ReplyRepository.hasPending(notificationId)) {
+            NotificationControl.refreshActiveNotificationsNow()
+        }
+        Log.i(TAG, "starting voice after BLE wake id=${notificationId.take(8)}")
+        RelayService.cancelIdleStop()
+        VoiceController.start(context, localLink, notificationId)
     }
 
     private fun notificationForwardingPaused(): Boolean =
@@ -493,6 +520,7 @@ object RelayBridge {
                 if (id.isBlank() || localLink == null) {
                     sendReplyResult(id, false, "No active notification")
                 } else {
+                    if (pendingWakeVoiceNotificationId == id) pendingWakeVoiceNotificationId = ""
                     if (!ReplyRepository.hasPending(id)) {
                         NotificationControl.refreshActiveNotificationsNow()
                     }

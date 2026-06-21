@@ -195,8 +195,11 @@ class MainActivity : Activity() {
                 autoReauthAttempted = false
                 when {
                     shouldArmRelay -> {
-                        RelayStarter.armAndPrepare(this, RelayStarter.START_REASON_MANUAL)
-                        "Hi Rokid authorized. Relay armed."
+                        if (armRelayAfterSetupReady()) {
+                            "Hi Rokid authorized. Relay armed."
+                        } else {
+                            "Hi Rokid authorized. ${speechSetupBlocker() ?: "Finish speech setup before Start."}"
+                        }
                     }
                     RelayService.running -> {
                         RelayStarter.start(this, result.token, "authorization")
@@ -1028,6 +1031,12 @@ class MainActivity : Activity() {
         val sttReady = sttReady(selectedEngine, stt)
         val micPermissionGranted = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         val companionLinked = CompanionDeviceCoordinator.hasAssociation(this)
+        val androidCxrTooOld = selectedEngine == SpeechToTextEngine.ANDROID_CXR &&
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
+        val androidCxrNeedsCompanion = selectedEngine == SpeechToTextEngine.ANDROID_CXR &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE &&
+            !companionLinked
+        val androidCxrNeedsMic = selectedEngine.requiresMicrophonePermission && !micPermissionGranted
         maybeAutoReauthorizeAfterBindFailure(snap, authSaved)
 
         if (::setupRows.isInitialized) {
@@ -1108,9 +1117,10 @@ class MainActivity : Activity() {
                 !hiRokid -> "Install or expose Hi Rokid Global first."
                 !authSaved -> "Authorize once, then the relay can start automatically."
                 !notifications -> "Notification access is still required."
+                androidCxrTooOld -> "Android CXR needs Android 13+. Choose an API speech engine on this phone."
+                androidCxrNeedsMic -> "Grant microphone permission for Android CXR voice replies."
+                androidCxrNeedsCompanion -> "Link the glasses as companion device so the mic works in the background."
                 !sttReady -> "Finish speech-to-text setup for voice replies."
-                selectedEngine.requiresMicrophonePermission && !companionLinked ->
-                    "Link the glasses as companion device so the mic works in the background."
                 !batteryUnrestricted -> "Ready. Set battery to Unrestricted for best reliability."
                 RelayService.running && NotificationForwardingPolicy.isPaused(this) ->
                     "Ready. Forwarding is paused while this screen is on."
@@ -1123,8 +1133,12 @@ class MainActivity : Activity() {
 
         if (::sttSummary.isInitialized) {
             sttSummary.text = when {
+                androidCxrTooOld ->
+                    "${selectedEngine.displayName}. Android 13+ required."
                 selectedEngine.requiresMicrophonePermission && !micPermissionGranted ->
                     "${selectedEngine.displayName}. Microphone permission required."
+                androidCxrNeedsCompanion ->
+                    "${selectedEngine.displayName}. Companion link required for background voice replies."
                 selectedEngine.credentialKind == SpeechToTextCredentialKind.OPENAI && openAiLabel.isNullOrBlank() ->
                     "${selectedEngine.displayName}. Add an OpenAI key."
                 selectedEngine.credentialKind == SpeechToTextCredentialKind.ELEVENLABS && elevenLabsLabel.isNullOrBlank() ->
@@ -1855,9 +1869,28 @@ class MainActivity : Activity() {
             requestHiRokidAuthorization(auto = false, reason = RelayStarter.START_REASON_MANUAL)
             return
         }
+        val blocker = speechSetupBlocker()
+        if (blocker != null) {
+            if (
+                SpeechToTextSettingsStore(this).selectedEngine().requiresMicrophonePermission &&
+                checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
+            ) {
+                requestMicrophonePermissionIfNeeded()
+            }
+            RelayBridge.setStatus(blocker)
+            toastLine(blocker)
+            renderStatus()
+            return
+        }
+        armRelayAfterSetupReady()
+    }
+
+    private fun armRelayAfterSetupReady(): Boolean {
+        if (speechSetupBlocker() != null) return false
         RelayStarter.armAndPrepare(this, RelayStarter.START_REASON_MANUAL)
         CompanionDeviceCoordinator.startObserving(this)
         BleWakeServer.ensureStarted(this)
+        return true
     }
 
     private fun syncSettingsAfterUserChange() {
@@ -1904,13 +1937,40 @@ class MainActivity : Activity() {
     }
 
     private fun sttReady(engine: SpeechToTextEngine, store: SttCredentialStore): Boolean =
+        speechSetupBlocker(engine, store, CompanionDeviceCoordinator.hasAssociation(this)) == null
+
+    private fun speechSetupBlocker(): String? =
+        speechSetupBlocker(
+            SpeechToTextSettingsStore(this).selectedEngine(),
+            SttCredentialStore(this),
+            CompanionDeviceCoordinator.hasAssociation(this),
+        )
+
+    private fun speechSetupBlocker(
+        engine: SpeechToTextEngine,
+        store: SttCredentialStore,
+        companionLinked: Boolean,
+    ): String? =
         when {
-            engine.requiresMicrophonePermission ->
-                checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-            engine.credentialKind == SpeechToTextCredentialKind.AZURE ->
-                store.hasCredential(engine) && !store.azureRegion().isNullOrBlank()
-            engine.requiresCredential -> store.hasCredential(engine)
-            else -> true
+            engine == SpeechToTextEngine.ANDROID_CXR &&
+                Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ->
+                "Android CXR needs Android 13+"
+            engine.requiresMicrophonePermission &&
+                checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED ->
+                "Grant microphone permission for Android CXR"
+            engine == SpeechToTextEngine.ANDROID_CXR &&
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE &&
+                !companionLinked ->
+                "Link the glasses as companion device for Android CXR"
+            engine.credentialKind == SpeechToTextCredentialKind.AZURE &&
+                !store.hasCredential(engine) ->
+                "Add an Azure Speech key"
+            engine.credentialKind == SpeechToTextCredentialKind.AZURE &&
+                store.azureRegion().isNullOrBlank() ->
+                "Set the Azure Speech region"
+            engine.requiresCredential && !store.hasCredential(engine) ->
+                "Add a ${engine.provider.displayName} STT key"
+            else -> null
         }
 
     private fun notificationAccessEnabled(): Boolean {

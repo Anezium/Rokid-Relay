@@ -29,6 +29,9 @@
         <package android:name="com.rokid.sprite.global.aiapp" />
         <package android:name="com.rokid.sprite.aiapp" />
         <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <intent>
             <action android:name="com.rokid.sprite.aiapp.externalapp.AUTHORIZATION" />
         </intent>
         <intent>

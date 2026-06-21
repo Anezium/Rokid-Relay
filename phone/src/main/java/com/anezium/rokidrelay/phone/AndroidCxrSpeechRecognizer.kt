@@ -475,7 +475,7 @@ class AndroidCxrSpeechRecognizer(
         const val TAG = "RelayAndroidCxrStt"
         const val CXR_AUDIO_PCM = 1
         const val SAMPLE_RATE_HZ = 16_000
-        const val CXR_AUDIO_FIRST_BYTE_TIMEOUT_MS = 1_800L
+        const val CXR_AUDIO_FIRST_BYTE_TIMEOUT_MS = 6_000L
         const val SPEECH_INPUT_MINIMUM_LENGTH_MS = 2_500L
         const val SPEECH_POSSIBLY_COMPLETE_SILENCE_MS = 2_500L
         const val SPEECH_COMPLETE_SILENCE_MS = 3_000L
