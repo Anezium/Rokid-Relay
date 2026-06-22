@@ -1071,7 +1071,7 @@ class MainActivity : Activity() {
             ), matchWrap(top = 8))
             setupRows.addView(setupRow(
                 title = "Companion link",
-                value = if (companionLinked) "Glasses linked" else "Needed for background mic",
+                value = if (companionLinked) "Glasses linked" else "Needed for background wake",
                 tone = if (companionLinked) StatusTone.Ready else StatusTone.Waiting,
                 actionLabel = "Link",
                 actionTone = if (companionLinked) ButtonTone.Secondary else ButtonTone.Primary,
@@ -1119,7 +1119,7 @@ class MainActivity : Activity() {
                 !notifications -> "Notification access is still required."
                 androidCxrTooOld -> "Android CXR needs Android 13+. Choose an API speech engine on this phone."
                 androidCxrNeedsMic -> "Grant microphone permission for Android CXR voice replies."
-                androidCxrNeedsCompanion -> "Link the glasses as companion device so the mic works in the background."
+                androidCxrNeedsCompanion -> "Link the glasses as companion device for background reply wake."
                 !sttReady -> "Finish speech-to-text setup for voice replies."
                 !batteryUnrestricted -> "Ready. Set battery to Unrestricted for best reliability."
                 RelayService.running && NotificationForwardingPolicy.isPaused(this) ->
@@ -1758,7 +1758,7 @@ class MainActivity : Activity() {
             SpeechToTextProvider.OPENAI -> "OpenAI: strong all-purpose recognition. Good if you already use an OpenAI key."
             SpeechToTextProvider.ELEVENLABS -> "ElevenLabs: voice-focused recognition with simple realtime and buffered choices."
             SpeechToTextProvider.AZURE -> "Azure: free 5 h/month tier with wide language coverage. Buffered only — no realtime, text appears after you stop speaking."
-            SpeechToTextProvider.ANDROID -> "Android: local phone recognition. No API key, but needs microphone permission."
+            SpeechToTextProvider.ANDROID -> "Android: local phone recognition with the CXR audio pipe. No API key, but Android still requires microphone permission."
         }
 
     private fun buttonBackground(tone: ButtonTone): StateListDrawable {

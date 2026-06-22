@@ -7,8 +7,8 @@ import android.util.Log
 
 /**
  * Bound by the system while the associated glasses are in range. While this binding is
- * active the app holds companion-device exemptions, so this is the right moment to (re)start
- * the relay and re-acquire the microphone foreground type that background starts cannot get.
+ * active the app holds companion-device exemptions, which helps the relay stay eligible for
+ * background connected-device wake work while the glasses are nearby.
  *
  * The framework picks one callback depending on the platform version: Android 16+ delivers
  * DevicePresenceEvent, 13-15 the AssociationInfo variant, and older builds the plain address.

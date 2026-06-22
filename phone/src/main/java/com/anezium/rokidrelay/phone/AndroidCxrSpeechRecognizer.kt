@@ -52,7 +52,6 @@ class AndroidCxrSpeechRecognizer(
     private var finalResultTimeout: Runnable? = null
     private var inputClosed = false
     private var inputCloseReason = ""
-    private var microphoneForegroundRequested = false
 
     fun start(): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
@@ -67,17 +66,7 @@ class AndroidCxrSpeechRecognizer(
             failBeforeStart("Android speech recognition unavailable")
             return false
         }
-        microphoneForegroundRequested = true
-        RelayService.setMicrophoneForegroundRequested(true)
-        if (!RelayService.microphoneForegroundActive) {
-            val detail = RelayService.lastMicrophoneForegroundError
-            Log.w(TAG, "Microphone foreground unavailable: ${detail.ifBlank { "unknown" }}")
-            releaseMicrophoneForeground()
-            failBeforeStart("Open phone app for Android CXR mic")
-            return false
-        }
         val readFd = startCxrAudioSource() ?: run {
-            releaseMicrophoneForeground()
             failBeforeStart("Glasses audio stream unavailable")
             return false
         }
@@ -95,6 +84,7 @@ class AndroidCxrSpeechRecognizer(
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, SPEECH_COMPLETE_SILENCE_MS)
             putExtra(RecognizerIntent.EXTRA_PROMPT, "Rokid Relay")
             putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE, readFd)
+            putExtra(RecognizerIntent.EXTRA_SEGMENTED_SESSION, RecognizerIntent.EXTRA_AUDIO_SOURCE)
             putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_SAMPLING_RATE, SAMPLE_RATE_HZ)
             putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_CHANNEL_COUNT, 1)
             putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_ENCODING, AudioFormat.ENCODING_PCM_16BIT)
@@ -312,14 +302,7 @@ class AndroidCxrSpeechRecognizer(
         recognizer = null
         runCatching { localRecognizer?.cancel() }
         runCatching { localRecognizer?.destroy() }
-        releaseMicrophoneForeground()
         afterCleanup()
-    }
-
-    private fun releaseMicrophoneForeground() {
-        if (!microphoneForegroundRequested) return
-        microphoneForegroundRequested = false
-        RelayService.setMicrophoneForegroundRequested(false)
     }
 
     private fun closeRecognizerInput(reason: String) {

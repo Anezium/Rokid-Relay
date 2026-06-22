@@ -19,11 +19,9 @@ import java.util.regex.Pattern
 /**
  * Companion Device Manager association with the glasses.
  *
- * Android 14+ treats FOREGROUND_SERVICE_TYPE_MICROPHONE as a while-in-use type: the relay
- * service cannot (re)acquire it while the app is in the background, which breaks the Android
- * CXR speech engine after every reboot or background restart. A CDM association (with device
- * presence observation) exempts the app from those background-start restrictions, so the mic
- * foreground type can be acquired even when the voice reply is triggered from the glasses.
+ * Android 14+ is strict about background foreground-service starts. A CDM association with
+ * presence observation gives the relay the connected-device exemptions it needs while the
+ * glasses are nearby. Android CXR audio itself is still routed through the CXR PCM pipe.
  *
  * The glasses are already bonded through Hi Rokid and neither respond to classic inquiry nor
  * advertise their name over BLE, so a plain CDM discovery never finds them. CDM has a

@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.1.15-preview.7 - 2026-06-22
+
+- Changed `Android CXR` voice capture to force Android `SpeechRecognizer` through the injected CXR `EXTRA_AUDIO_SOURCE` segmented session instead of requiring an Android microphone foreground-service upgrade.
+- Removed the intermittent `Open phone app for Android CXR mic` failure path on background wake replies while keeping the CXR glasses microphone stream as the only audio source.
+- Updated diagnostics and setup copy so `Android CXR` is described as a CXR audio pipe with Android speech permission, not as phone-microphone capture.
+- Bumped the phone app to `0.1.15-preview.7` / `versionCode 22`; bundled glasses helper remains `0.1.10-preview.5` / `versionCode 15`.
+
 ## v0.1.15-preview.6 - 2026-06-21
 
 - Added Android speech recognition service visibility so `Android CXR` can reliably discover the phone speech engine on Android 11+ target builds.
