@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.1.15-preview.8 - 2026-06-23
+
+- Restored Android CXR's microphone foreground-service type while voice capture is active, fixing the `Microphone permission denied` regression introduced by `v0.1.15-preview.7` on recognizers that still gate injected audio behind microphone access.
+- Kept the `EXTRA_AUDIO_SOURCE` segmented-session pipe so supported Android recognizers consume the CXR glasses microphone stream.
+- Reworded Android CXR permission failures to ask the user to open the phone app instead of reporting a misleading runtime permission denial.
+- Bumped the phone app to `0.1.15-preview.8` / `versionCode 23`; bundled glasses helper remains `0.1.10-preview.5` / `versionCode 15`.
+
 ## v0.1.15-preview.7 - 2026-06-22
 
 - Changed `Android CXR` voice capture to force Android `SpeechRecognizer` through the injected CXR `EXTRA_AUDIO_SOURCE` segmented session instead of requiring an Android microphone foreground-service upgrade.

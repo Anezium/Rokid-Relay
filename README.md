@@ -177,9 +177,9 @@ Rokid Relay has two speech modes.
 
 ### Android
 
-`Android CXR` uses Android speech recognition with the glasses CXR audio stream injected through Android's `EXTRA_AUDIO_SOURCE` pipe. It does not require an API key, but Android still requires microphone permission before an app can use `SpeechRecognizer`.
+`Android CXR` uses Android speech recognition with the glasses CXR audio stream injected through Android's `EXTRA_AUDIO_SOURCE` pipe. It does not require an API key, but Android still requires microphone permission and a microphone foreground-service type while capture is active.
 
-Relay forces Android CXR into segmented injected-audio mode so the recognizer consumes the CXR PCM stream instead of asking Android to open the phone microphone. If the phone recognizer does not support injected audio, Relay reports a voice error instead of silently using the phone microphone. The `Companion link` setup row is still recommended on Android 14+ because it improves background service starts while the glasses are in range.
+Relay forces Android CXR into segmented injected-audio mode so supported recognizers consume the CXR PCM stream. If the phone recognizer refuses background recognition, Relay reports a voice error instead of silently using the phone microphone. The `Companion link` setup row is still recommended on Android 14+ because it improves background service starts while the glasses are in range.
 
 ### API
 
@@ -467,7 +467,7 @@ If voice reply fails:
 - confirm the selected STT engine is ready;
 - save the required OpenAI or ElevenLabs key if using `API`;
 - grant microphone permission if using `Android CXR`;
-- check diagnostics for `CXR audio`, `Voice error`, and Android speech availability.
+- check diagnostics for `Mic foreground`, `CXR audio`, `Voice error`, and Android speech availability.
 
 If Hi Rokid binding fails:
 
