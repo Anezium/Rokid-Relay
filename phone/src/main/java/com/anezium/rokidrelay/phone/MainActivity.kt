@@ -847,6 +847,11 @@ class MainActivity : Activity() {
                     rowLanguages.forEachIndexed { index, language ->
                         val chip = languageChip(language.label) {
                             val store = SpeechToTextSettingsStore(this@MainActivity)
+                            if (store.selectedEngine() == SpeechToTextEngine.ANDROID_CXR &&
+                                language != TranscriptionLanguage.AUTO
+                            ) {
+                                return@languageChip
+                            }
                             if (store.selectedLanguage() != language) {
                                 store.saveSelectedLanguage(language)
                                 renderStatus()
@@ -887,23 +892,52 @@ class MainActivity : Activity() {
             setOnClickListener { onClick() }
         }
 
-    private fun styleLanguageChip(chip: TextView, isSelected: Boolean) {
-        chip.setTextColor(if (isSelected) COLOR_PHOSPHOR else COLOR_TEXT)
+    private fun styleLanguageChip(chip: TextView, isSelected: Boolean, isEnabled: Boolean) {
+        chip.isEnabled = isEnabled
+        chip.isClickable = isEnabled
+        chip.isFocusable = isEnabled
+        chip.alpha = if (isEnabled) 1f else 0.58f
+        chip.setTextColor(
+            when {
+                isSelected -> COLOR_PHOSPHOR
+                isEnabled -> COLOR_TEXT
+                else -> COLOR_DIM
+            },
+        )
         chip.background = roundedRect(
-            if (isSelected) COLOR_SELECTED else COLOR_FIELD,
-            if (isSelected) COLOR_PHOSPHOR else COLOR_PHOSPHOR_DIM,
+            when {
+                isSelected -> COLOR_SELECTED
+                isEnabled -> COLOR_FIELD
+                else -> COLOR_DISABLED
+            },
+            when {
+                isSelected -> COLOR_PHOSPHOR
+                isEnabled -> COLOR_PHOSPHOR_DIM
+                else -> COLOR_STROKE
+            },
             radius = 8,
-            strokeWidth = 2,
+            strokeWidth = if (isEnabled || isSelected) 2 else 1,
         )
     }
 
-    private fun updateLanguageButtons(selected: TranscriptionLanguage) {
+    private fun updateLanguageButtons(
+        selected: TranscriptionLanguage,
+        selectedEngine: SpeechToTextEngine,
+    ) {
+        val androidCxrSelected = selectedEngine == SpeechToTextEngine.ANDROID_CXR
         languageButtons.forEach { (language, chip) ->
-            styleLanguageChip(chip, language == selected)
+            styleLanguageChip(
+                chip = chip,
+                isSelected = language == selected,
+                isEnabled = !androidCxrSelected || language == TranscriptionLanguage.AUTO,
+            )
         }
         if (::languageHint.isInitialized) {
-            languageHint.text = selected.uiNote
-                ?: "${selected.summaryName} is forced for voice replies on every engine."
+            languageHint.text = if (androidCxrSelected) {
+                "Android CXR uses SpeechRecognizer auto-detection; explicit language codes are disabled for this engine."
+            } else {
+                selected.uiNote ?: "${selected.summaryName} is forced for voice replies on every engine."
+            }
         }
     }
 
@@ -1021,8 +1055,9 @@ class MainActivity : Activity() {
         val notifications = notificationAccessEnabled()
         val authSaved = !savedToken().isNullOrBlank()
         val batteryUnrestricted = batteryOptimizationsIgnored()
-        val selectedEngine = SpeechToTextSettingsStore(this).selectedEngine()
-        val selectedLanguage = SpeechToTextSettingsStore(this).selectedLanguage()
+        val speechSettings = SpeechToTextSettingsStore(this)
+        val selectedEngine = speechSettings.selectedEngine()
+        val selectedLanguage = speechSettings.selectedLanguageForEngine(selectedEngine)
         val stt = SttCredentialStore(this)
         val openAiLabel = stt.accountLabel(SpeechToTextCredentialKind.OPENAI)
         val elevenLabsLabel = stt.accountLabel(SpeechToTextCredentialKind.ELEVENLABS)
@@ -1249,7 +1284,7 @@ class MainActivity : Activity() {
         }
 
         updateSpeechChoiceButtons(selectedEngine)
-        updateLanguageButtons(selectedLanguage)
+        updateLanguageButtons(selectedLanguage, selectedEngine)
         updateApiKeys(selectedEngine, openAiLabel, elevenLabsLabel, azureLabel, azureRegion)
 
         if (::diagnosticsPanel.isInitialized) {

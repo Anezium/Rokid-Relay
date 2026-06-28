@@ -11,6 +11,8 @@ import java.util.Locale
  * entry carries per-provider codes instead of one BCP-47 tag: ElevenLabs takes ISO codes
  * (`yue` is distinct from `zh`), Azure takes full locales (`zh-HK`/`zh-TW`/`zh-CN` pick the
  * script), OpenAI has no Cantonese label so it is steered through the prompt instead.
+ * Android SpeechRecognizer is less consistent about script/dialect tags, so Android CXR uses
+ * common regional Chinese locales and falls back to auto-detection if the phone rejects them.
  */
 enum class TranscriptionLanguage(
     val id: String,
@@ -109,8 +111,8 @@ enum class TranscriptionLanguage(
         openAiPrompt = "廣東話語音。請用繁體中文轉寫。",
         elevenLabsCode = "yue",
         azureLocale = "zh-HK",
-        androidTag = "yue-Hant-HK",
-        uiNote = "ElevenLabs (yue) and Azure (zh-HK) write Traditional Chinese. OpenAI has no Cantonese mode and is prompt-steered only.",
+        androidTag = "zh-HK",
+        uiNote = "ElevenLabs (yue) and Azure (zh-HK) write Traditional Chinese. Android CXR uses the Hong Kong Chinese locale and retries Auto if the phone rejects it.",
     ),
     CHINESE_TRADITIONAL(
         id = "zh-hant",
@@ -120,7 +122,7 @@ enum class TranscriptionLanguage(
         openAiPrompt = "請使用繁體中文。",
         elevenLabsCode = "zh",
         azureLocale = "zh-TW",
-        androidTag = "zh-Hant-TW",
+        androidTag = "zh-TW",
         uiNote = "Azure (zh-TW) guarantees Traditional script. ElevenLabs picks the script itself for Mandarin.",
     ),
     CHINESE_SIMPLIFIED(
@@ -131,7 +133,7 @@ enum class TranscriptionLanguage(
         openAiPrompt = "请使用简体中文。",
         elevenLabsCode = "zh",
         azureLocale = "zh-CN",
-        androidTag = "zh-Hans-CN",
+        androidTag = "zh-CN",
     ),
     ;
 

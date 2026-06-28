@@ -4,6 +4,10 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <application>
+        <activity
+            android:name=".SpeechRecognizerLanguageProbeActivity"
+            android:exported="true" />
+
         <receiver
             android:name=".TestNotificationReceiver"
             android:exported="true"

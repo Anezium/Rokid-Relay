@@ -42,7 +42,7 @@ object VoiceController {
             val appContext = context.applicationContext
             val settings = SpeechToTextSettingsStore(appContext)
             val selectedEngine = settings.selectedEngine()
-            val selectedLanguage = settings.selectedLanguage()
+            val selectedLanguage = settings.selectedLanguageForEngine(selectedEngine)
             val credentials = SttCredentialStore(appContext)
             if (selectedEngine.requiresCredential && !credentials.hasCredential(selectedEngine)) {
                 RelayBridge.sendReplyResult(notificationId, false, "${selectedEngine.provider.displayName} STT key missing")
@@ -136,12 +136,18 @@ object VoiceController {
         link: CXRLink,
         notificationId: String,
         language: TranscriptionLanguage,
+        retryWithoutLanguageHint: Boolean = false,
     ) {
         var recognizerRef: AndroidCxrSpeechRecognizer? = null
+        val androidLanguageTag = if (retryWithoutLanguageHint) {
+            null
+        } else {
+            (language.androidTag ?: Locale.getDefault().toLanguageTag()).takeIf { it.isNotBlank() }
+        }
         val recognizer = AndroidCxrSpeechRecognizer(
             context = context,
             link = link,
-            languageTag = language.androidTag ?: Locale.getDefault().toLanguageTag(),
+            languageTag = androidLanguageTag,
             listener = object : AndroidCxrSpeechRecognizer.Listener {
                 override fun onListening() {
                     if (voiceActive && activeRecognizer === recognizerRef && activeNotificationId == notificationId) {
@@ -172,6 +178,29 @@ object VoiceController {
                     if (voiceActive && activeRecognizer === recognizerRef && activeNotificationId == notificationId) {
                         failVoiceRecognition(message)
                     }
+                }
+
+                override fun onUnsupportedLanguage(languageTag: String?, message: String): Boolean {
+                    if (
+                        !voiceActive ||
+                        activeRecognizer !== recognizerRef ||
+                        activeNotificationId != notificationId ||
+                        retryWithoutLanguageHint ||
+                        languageTag.isNullOrBlank()
+                    ) {
+                        return false
+                    }
+                    Log.i(TAG, "Android CXR rejected language '$languageTag'; retrying without language hint")
+                    activeRecognizer = null
+                    RelayBridge.sendVoiceState("listening")
+                    startAndroidCxrRecognizer(
+                        context = context,
+                        link = link,
+                        notificationId = notificationId,
+                        language = TranscriptionLanguage.AUTO,
+                        retryWithoutLanguageHint = true,
+                    )
+                    return true
                 }
             },
         )

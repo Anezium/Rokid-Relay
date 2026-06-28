@@ -25,7 +25,7 @@ import java.util.Locale
 class AndroidCxrSpeechRecognizer(
     private val context: Context,
     private val link: CXRLink,
-    private val languageTag: String,
+    private val languageTag: String?,
     private val listener: Listener,
 ) {
     interface Listener {
@@ -34,6 +34,7 @@ class AndroidCxrSpeechRecognizer(
         fun onAudioLevel(snapshot: VoiceActivitySnapshot)
         fun onComplete(transcript: String, reason: String)
         fun onError(message: String)
+        fun onUnsupportedLanguage(languageTag: String?, message: String): Boolean = false
     }
 
     private val appContext = context.applicationContext
@@ -90,8 +91,10 @@ class AndroidCxrSpeechRecognizer(
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, languageTag)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, languageTag)
+            languageTag?.takeIf { it.isNotBlank() }?.let { tag ->
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, tag)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, tag)
+            }
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, SPEECH_INPUT_MINIMUM_LENGTH_MS)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, SPEECH_POSSIBLY_COMPLETE_SILENCE_MS)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, SPEECH_COMPLETE_SILENCE_MS)
@@ -294,6 +297,8 @@ class AndroidCxrSpeechRecognizer(
                     (inputClosed || error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT)
                 ) {
                     complete(partial, "${inputCloseReason.ifBlank { "android-partial" }} error=$error")
+                } else if (error.isLanguageSupportError()) {
+                    recoverUnsupportedLanguage(error.toVoiceMessage(inputClosed))
                 } else {
                     fail(error.toVoiceMessage(inputClosed))
                 }
@@ -345,6 +350,14 @@ class AndroidCxrSpeechRecognizer(
     private fun fail(message: String) {
         finish {
             listener.onError(message)
+        }
+    }
+
+    private fun recoverUnsupportedLanguage(message: String) {
+        finish {
+            if (!listener.onUnsupportedLanguage(languageTag, message)) {
+                listener.onError(message)
+            }
         }
     }
 
@@ -532,6 +545,10 @@ class AndroidCxrSpeechRecognizer(
             SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Speech recognizer busy"
             else -> "Speech recognition error $this"
         }
+
+    private fun Int.isLanguageSupportError(): Boolean =
+        this == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ||
+            this == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE
 
     private companion object {
         const val TAG = "RelayAndroidCxrStt"

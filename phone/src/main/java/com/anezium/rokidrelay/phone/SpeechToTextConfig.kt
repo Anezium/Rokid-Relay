@@ -152,11 +152,27 @@ class SpeechToTextSettingsStore(context: Context) {
     }
 
     fun saveSelectedEngine(engine: SpeechToTextEngine) {
-        prefs.edit().putString(Constants.PREF_STT_ENGINE, engine.id).apply()
+        prefs.edit()
+            .putString(Constants.PREF_STT_ENGINE, engine.id)
+            .also { editor ->
+                if (engine == SpeechToTextEngine.ANDROID_CXR) {
+                    editor.putString(Constants.PREF_STT_LANGUAGE, TranscriptionLanguage.AUTO.id)
+                }
+            }
+            .apply()
     }
 
     fun selectedLanguage(): TranscriptionLanguage =
         TranscriptionLanguage.fromId(prefs.getString(Constants.PREF_STT_LANGUAGE, null))
+
+    fun selectedLanguageForEngine(engine: SpeechToTextEngine): TranscriptionLanguage {
+        val selected = selectedLanguage()
+        if (engine != SpeechToTextEngine.ANDROID_CXR || selected == TranscriptionLanguage.AUTO) {
+            return selected
+        }
+        saveSelectedLanguage(TranscriptionLanguage.AUTO)
+        return TranscriptionLanguage.AUTO
+    }
 
     fun saveSelectedLanguage(language: TranscriptionLanguage) {
         prefs.edit().putString(Constants.PREF_STT_LANGUAGE, language.id).apply()

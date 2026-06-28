@@ -30,7 +30,7 @@ class TranscriptionLanguageConfigTest {
         assertTrue(language.openAiPrompt?.isNotBlank() == true)
         assertEquals("yue", language.elevenLabsCode)
         assertEquals("zh-HK", language.azureLocale)
-        assertEquals("yue-Hant-HK", language.androidTag)
+        assertEquals("zh-HK", language.androidTag)
     }
 
     @Test
@@ -41,7 +41,7 @@ class TranscriptionLanguageConfigTest {
         assertTrue(language.openAiPrompt?.isNotBlank() == true)
         assertEquals("zh", language.elevenLabsCode)
         assertEquals("zh-TW", language.azureLocale)
-        assertEquals("zh-Hant-TW", language.androidTag)
+        assertEquals("zh-TW", language.androidTag)
     }
 
     @Test
@@ -52,6 +52,6 @@ class TranscriptionLanguageConfigTest {
         assertTrue(language.openAiPrompt?.isNotBlank() == true)
         assertEquals("zh", language.elevenLabsCode)
         assertEquals("zh-CN", language.azureLocale)
-        assertEquals("zh-Hans-CN", language.androidTag)
+        assertEquals("zh-CN", language.androidTag)
     }
 }

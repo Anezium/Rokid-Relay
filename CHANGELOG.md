@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.1.15-preview.10 - 2026-06-28
+
+- Forced `Android CXR` voice replies back to `Auto` transcription language after device testing showed explicit `SpeechRecognizer` language tags can fail with injected CXR audio.
+- Disabled and dimmed all non-`Auto` language chips in the phone Speech panel while `Android CXR` is selected.
+- Added a safety path that coerces stale saved Android CXR language preferences back to `Auto` before voice capture starts.
+- Kept API speech engines on the explicit language selector, so OpenAI, ElevenLabs, and Azure still use their provider-specific language settings.
+- Added a debug-only `SpeechRecognizer` language probe for repeatable phone-side testing of support checks and injected-audio `startListening()` behavior.
+- Bumped the phone app to `0.1.15-preview.10` / `versionCode 25`; bundled glasses helper remains `0.1.10-preview.5` / `versionCode 15`.
+
 ## v0.1.15-preview.9 - 2026-06-28
 
 - Preferred the Google Android speech recognition service for `Android CXR` injected-audio sessions, with on-device/system fallbacks for phones that support them.
