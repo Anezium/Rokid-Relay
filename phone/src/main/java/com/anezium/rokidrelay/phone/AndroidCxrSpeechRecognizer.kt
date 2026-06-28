@@ -543,7 +543,7 @@ class AndroidCxrSpeechRecognizer(
         const val SPEECH_COMPLETE_SILENCE_MS = 3_000L
         const val DIAGNOSTICS_UPDATE_MS = 500L
         const val VAD_CHECK_INTERVAL_MS = 120L
-        const val FINAL_RESULT_TIMEOUT_MS = 8_000L
+        const val FINAL_RESULT_TIMEOUT_MS = 2_500L
         val WORD_SPLIT_REGEX = Regex("\\s+")
     }
 }
