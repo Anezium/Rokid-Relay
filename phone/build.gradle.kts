@@ -10,8 +10,8 @@ android {
         applicationId = "com.anezium.rokidrelay.phone"
         minSdk = 31
         targetSdk = 36
-        versionCode = 23
-        versionName = "0.1.15-preview.8"
+        versionCode = 24
+        versionName = "0.1.15-preview.9"
     }
 
     buildTypes {

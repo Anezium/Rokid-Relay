@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.15-preview.9 - 2026-06-28
+
+- Preferred the Google Android speech recognition service for `Android CXR` injected-audio sessions, with on-device/system fallbacks for phones that support them.
+- Finalized segmented CXR audio by closing the injected pipe without also forcing `stopListening()`, avoiding recognizers that drop late partial/final results.
+- Restored the Android CXR final-result safety timeout to 2.5 seconds after logs showed the 8-second fallback added excessive delay after phrase end.
+- Added more Android CXR recognizer diagnostics around ready, partial, final, error, and CXR audio state callbacks.
+- Bumped the phone app to `0.1.15-preview.9` / `versionCode 24`; bundled glasses helper remains `0.1.10-preview.5` / `versionCode 15`.
+
 ## v0.1.15-preview.8 - 2026-06-23
 
 - Restored Android CXR's microphone foreground-service type while voice capture is active, fixing the `Microphone permission denied` regression introduced by `v0.1.15-preview.7` on recognizers that still gate injected audio behind microphone access.
