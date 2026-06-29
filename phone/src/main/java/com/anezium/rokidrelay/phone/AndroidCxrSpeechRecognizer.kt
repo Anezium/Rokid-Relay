@@ -35,6 +35,7 @@ class AndroidCxrSpeechRecognizer(
         fun onComplete(transcript: String, reason: String)
         fun onError(message: String)
         fun onUnsupportedLanguage(languageTag: String?, message: String): Boolean = false
+        fun onRecoverableError(message: String): Boolean = false
     }
 
     private val appContext = context.applicationContext
@@ -292,13 +293,12 @@ class AndroidCxrSpeechRecognizer(
                 )
                 if (!isActive(owner)) return
                 val partial = bestPartialTranscript.trim()
-                if (
-                    partial.isNotBlank() &&
-                    (inputClosed || error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT)
-                ) {
+                if (partial.isNotBlank() && error.allowsPartialFallback(inputClosed)) {
                     complete(partial, "${inputCloseReason.ifBlank { "android-partial" }} error=$error")
                 } else if (error.isLanguageSupportError()) {
                     recoverUnsupportedLanguage(error.toVoiceMessage(inputClosed))
+                } else if (error.isRecoverableRecognizerError()) {
+                    recoverTransientRecognizerError(error.toVoiceMessage(inputClosed))
                 } else {
                     fail(error.toVoiceMessage(inputClosed))
                 }
@@ -356,6 +356,14 @@ class AndroidCxrSpeechRecognizer(
     private fun recoverUnsupportedLanguage(message: String) {
         finish {
             if (!listener.onUnsupportedLanguage(languageTag, message)) {
+                listener.onError(message)
+            }
+        }
+    }
+
+    private fun recoverTransientRecognizerError(message: String) {
+        finish {
+            if (!listener.onRecoverableError(message)) {
                 listener.onError(message)
             }
         }
@@ -542,13 +550,29 @@ class AndroidCxrSpeechRecognizer(
             SpeechRecognizer.ERROR_NETWORK,
             SpeechRecognizer.ERROR_NETWORK_TIMEOUT,
             -> "Speech network error"
+            SpeechRecognizer.ERROR_CLIENT -> "Speech recognizer client error"
+            SpeechRecognizer.ERROR_SERVER -> "Speech recognizer server error"
+            SpeechRecognizer.ERROR_SERVER_DISCONNECTED -> "Speech recognizer disconnected"
             SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Speech recognizer busy"
+            SpeechRecognizer.ERROR_TOO_MANY_REQUESTS -> "Speech recognizer rate limited"
             else -> "Speech recognition error $this"
         }
 
     private fun Int.isLanguageSupportError(): Boolean =
         this == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ||
             this == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE
+
+    private fun Int.isRecoverableRecognizerError(): Boolean =
+        this == SpeechRecognizer.ERROR_SERVER_DISCONNECTED
+
+    private fun Int.allowsPartialFallback(inputWasClosed: Boolean): Boolean =
+        inputWasClosed ||
+            this == SpeechRecognizer.ERROR_NO_MATCH ||
+            this == SpeechRecognizer.ERROR_SPEECH_TIMEOUT ||
+            this == SpeechRecognizer.ERROR_SERVER_DISCONNECTED ||
+            this == SpeechRecognizer.ERROR_SERVER ||
+            this == SpeechRecognizer.ERROR_NETWORK ||
+            this == SpeechRecognizer.ERROR_NETWORK_TIMEOUT
 
     private companion object {
         const val TAG = "RelayAndroidCxrStt"

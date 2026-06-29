@@ -17,6 +17,8 @@ object VoiceController {
     private const val REVIEW_MS_PER_WORD = 180L
     private const val REVIEW_TICK_MS = 1_000L
     private const val REALTIME_READY_TIMEOUT_MS = 12_000L
+    private const val MAX_ANDROID_CXR_RECOGNIZER_RETRIES = 1
+    private const val ANDROID_CXR_RECOGNIZER_RETRY_DELAY_MS = 650L
 
     private val main = Handler(Looper.getMainLooper())
     private val transcriptionExecutor = Executors.newSingleThreadExecutor()
@@ -137,6 +139,7 @@ object VoiceController {
         notificationId: String,
         language: TranscriptionLanguage,
         retryWithoutLanguageHint: Boolean = false,
+        recognizerRetryAttempt: Int = 0,
     ) {
         var recognizerRef: AndroidCxrSpeechRecognizer? = null
         val androidLanguageTag = if (retryWithoutLanguageHint) {
@@ -199,7 +202,39 @@ object VoiceController {
                         notificationId = notificationId,
                         language = TranscriptionLanguage.AUTO,
                         retryWithoutLanguageHint = true,
+                        recognizerRetryAttempt = recognizerRetryAttempt,
                     )
+                    return true
+                }
+
+                override fun onRecoverableError(message: String): Boolean {
+                    if (
+                        !voiceActive ||
+                        activeRecognizer !== recognizerRef ||
+                        activeNotificationId != notificationId ||
+                        recognizerRetryAttempt >= MAX_ANDROID_CXR_RECOGNIZER_RETRIES
+                    ) {
+                        return false
+                    }
+                    Log.i(TAG, "Android CXR recognizer interrupted; retrying once: $message")
+                    activeRecognizer = null
+                    RelayBridge.sendVoiceState("listening")
+                    main.postDelayed({
+                        if (
+                            voiceActive &&
+                            activeNotificationId == notificationId &&
+                            activeRecognizer == null
+                        ) {
+                            startAndroidCxrRecognizer(
+                                context = context,
+                                link = link,
+                                notificationId = notificationId,
+                                language = language,
+                                retryWithoutLanguageHint = retryWithoutLanguageHint,
+                                recognizerRetryAttempt = recognizerRetryAttempt + 1,
+                            )
+                        }
+                    }, ANDROID_CXR_RECOGNIZER_RETRY_DELAY_MS)
                     return true
                 }
             },

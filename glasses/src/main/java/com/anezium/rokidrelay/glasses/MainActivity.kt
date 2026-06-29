@@ -6,6 +6,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
 import android.view.KeyEvent
@@ -13,6 +15,13 @@ import android.view.Window
 import android.view.WindowManager
 
 class MainActivity : Activity() {
+    private val main = Handler(Looper.getMainLooper())
+    private val accessibilityRefreshRunnable = object : Runnable {
+        override fun run() {
+            RelayHudController.refreshAccessibility(this@MainActivity)
+            main.postDelayed(this, ACCESSIBILITY_REFRESH_MS)
+        }
+    }
     private lateinit var hud: RelayHudView
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -36,9 +45,17 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         RelayHudController.refreshAccessibility(this)
+        main.removeCallbacks(accessibilityRefreshRunnable)
+        main.postDelayed(accessibilityRefreshRunnable, ACCESSIBILITY_REFRESH_MS)
+    }
+
+    override fun onPause() {
+        main.removeCallbacks(accessibilityRefreshRunnable)
+        super.onPause()
     }
 
     override fun onDestroy() {
+        main.removeCallbacks(accessibilityRefreshRunnable)
         RelayHudController.detach(hud)
         super.onDestroy()
     }
@@ -128,5 +145,6 @@ class MainActivity : Activity() {
 
     companion object {
         private const val BLUETOOTH_PERMISSION_REQUEST = 7202
+        private const val ACCESSIBILITY_REFRESH_MS = 2_000L
     }
 }

@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.15-preview.11 - 2026-06-29
+
+- Treated Android `SpeechRecognizer` error 11 (`ERROR_SERVER_DISCONNECTED`) as a transient Android CXR recognizer disconnect instead of surfacing the raw error code immediately.
+- Retried one interrupted Android CXR recognizer session after the service disconnects, while preserving partial text if Android disconnects after speech was already recognized.
+- Added clearer Android CXR messages for recognizer client, server, disconnect, busy, and rate-limit failures.
+- Refreshed the glasses setup screen accessibility status while it remains open, so `ACCESSIBILITY ON` / `ENABLE ACCESSIBILITY` reflects changes without leaving and returning.
+- Bumped the phone app to `0.1.15-preview.11` / `versionCode 26` and the bundled glasses helper to `0.1.10-preview.6` / `versionCode 16`.
+
 ## v0.1.15-preview.10 - 2026-06-28
 
 - Forced `Android CXR` voice replies back to `Auto` transcription language after device testing showed explicit `SpeechRecognizer` language tags can fail with injected CXR audio.
