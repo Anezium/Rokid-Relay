@@ -1,6 +1,8 @@
 package com.anezium.rokidrelay.phone
 
 import android.content.Context
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Assert.assertSame
 import org.junit.Test
@@ -68,5 +70,19 @@ class SpeechToTextConfigTest {
             TranscriptionLanguage.FRENCH,
             store.selectedLanguageForEngine(SpeechToTextEngine.OPENAI_GPT_REALTIME_WHISPER),
         )
+    }
+
+    @Test
+    fun androidCxrAutoDoesNotSendExplicitLanguageHint() {
+        assertNull(androidCxrLanguageTag(TranscriptionLanguage.AUTO, retryWithoutLanguageHint = false))
+    }
+
+    @Test
+    fun androidCxrExplicitLanguageUsesAndroidTagUntilRetry() {
+        assertEquals(
+            "fr-FR",
+            androidCxrLanguageTag(TranscriptionLanguage.FRENCH, retryWithoutLanguageHint = false),
+        )
+        assertNull(androidCxrLanguageTag(TranscriptionLanguage.FRENCH, retryWithoutLanguageHint = true))
     }
 }

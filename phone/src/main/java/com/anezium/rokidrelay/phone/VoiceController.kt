@@ -142,11 +142,7 @@ object VoiceController {
         recognizerRetryAttempt: Int = 0,
     ) {
         var recognizerRef: AndroidCxrSpeechRecognizer? = null
-        val androidLanguageTag = if (retryWithoutLanguageHint) {
-            null
-        } else {
-            (language.androidTag ?: Locale.getDefault().toLanguageTag()).takeIf { it.isNotBlank() }
-        }
+        val androidLanguageTag = androidCxrLanguageTag(language, retryWithoutLanguageHint)
         val recognizer = AndroidCxrSpeechRecognizer(
             context = context,
             link = link,
@@ -606,4 +602,12 @@ object VoiceController {
     )
 
     private const val CXR_SAMPLE_RATE_HZ = 16_000
+}
+
+internal fun androidCxrLanguageTag(
+    language: TranscriptionLanguage,
+    retryWithoutLanguageHint: Boolean,
+): String? {
+    if (retryWithoutLanguageHint || language == TranscriptionLanguage.AUTO) return null
+    return language.androidTag?.takeIf { it.isNotBlank() }
 }

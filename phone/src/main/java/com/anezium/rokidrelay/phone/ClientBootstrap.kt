@@ -5,7 +5,6 @@ import android.util.Log
 import com.example.cxrglobal.CXRLink
 import com.example.cxrglobal.callbacks.IGlassAppCbk
 import java.io.File
-import java.security.MessageDigest
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -25,6 +24,7 @@ class ClientBootstrap(
         val installed = queryInstalled()
         val apk = extractAssetApk()
         val assetInfo = apk?.clientAssetInfo()
+        val rememberedClient = rememberedClientFingerprint() != null
         val shouldInstall = !installed || bundledClientChanged(assetInfo)
         if (!shouldInstall) {
             if (clientLaunchPending()) {
@@ -43,6 +43,23 @@ class ClientBootstrap(
                 success = true,
                 openedClient = false,
                 readyForMessages = true,
+            )
+        }
+        if (!openAfterInstall) {
+            val readyForMessages = installed
+            Log.i(
+                TAG,
+                "deferring bundled glasses app install/update until foreground start installed=$installed remembered=$rememberedClient",
+            )
+            return Result(
+                if (readyForMessages) {
+                    "glasses helper update pending"
+                } else {
+                    "glasses helper install pending"
+                },
+                success = true,
+                openedClient = false,
+                readyForMessages = readyForMessages,
             )
         }
         if (apk == null) {
@@ -140,19 +157,24 @@ class ClientBootstrap(
         ClientAssetInfo(
             versionName = packageInfo.versionName.orEmpty().ifBlank { "0.0.0" },
             versionCode = packageInfo.longVersionCode,
-            sha256 = sha256(),
         )
     }.onFailure {
         Log.w(TAG, "asset package read failed: ${it.message}")
     }.getOrNull()
 
     private fun bundledClientChanged(assetInfo: ClientAssetInfo?): Boolean {
-        val next = assetInfo?.fingerprint ?: return false
-        val last = context
+        assetInfo ?: return false
+        return bundledClientChanged(
+            lastFingerprint = rememberedClientFingerprint(),
+            nextVersionCode = assetInfo.versionCode,
+            nextVersionName = assetInfo.versionName,
+        )
+    }
+
+    private fun rememberedClientFingerprint(): String? =
+        context
             .getSharedPreferences(Constants.PREFS, Context.MODE_PRIVATE)
             .getString(Constants.PREF_CLIENT_APK_FINGERPRINT, null)
-        return last != next
-    }
 
     private fun rememberInstalledClient(assetInfo: ClientAssetInfo) {
         context
@@ -183,19 +205,6 @@ class ClientBootstrap(
             .apply()
     }
 
-    private fun File.sha256(): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        inputStream().use { input ->
-            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-            while (true) {
-                val read = input.read(buffer)
-                if (read <= 0) break
-                digest.update(buffer, 0, read)
-            }
-        }
-        return digest.digest().joinToString("") { "%02x".format(it) }
-    }
-
     private fun await(latch: CountDownLatch, timeoutMs: Long, label: String): Boolean {
         val ok = latch.await(timeoutMs, TimeUnit.MILLISECONDS)
         if (!ok) Log.w(TAG, "$label timed out")
@@ -205,9 +214,8 @@ class ClientBootstrap(
     private data class ClientAssetInfo(
         val versionName: String,
         val versionCode: Long,
-        val sha256: String,
     ) {
-        val fingerprint: String = "$versionCode:$versionName:$sha256"
+        val fingerprint: String = clientVersionFingerprint(versionCode, versionName)
         val label: String = "$versionName ($versionCode)"
     }
 
@@ -215,3 +223,15 @@ class ClientBootstrap(
         private const val TAG = "RelayBootstrap"
     }
 }
+
+internal fun bundledClientChanged(
+    lastFingerprint: String?,
+    nextVersionCode: Long,
+    nextVersionName: String,
+): Boolean {
+    val next = clientVersionFingerprint(nextVersionCode, nextVersionName)
+    return lastFingerprint != next && lastFingerprint?.startsWith("$next:") != true
+}
+
+private fun clientVersionFingerprint(versionCode: Long, versionName: String): String =
+    "$versionCode:$versionName"

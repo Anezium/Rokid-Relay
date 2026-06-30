@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.1.15-preview.12 - 2026-06-30
+
+- Fixed Android CXR `Auto` language mode so it no longer sends the phone locale as an explicit `SpeechRecognizer` language hint.
+- Kept non-`Auto` language chips disabled for Android CXR because Android injected-audio sessions still reject many explicit language tags; API engines keep explicit language selection.
+- Deferred bundled glasses helper installs/updates during background notification wakes so Android does not repeatedly disable the glasses Accessibility service after a helper package update.
+- Bumped the phone app to `0.1.15-preview.12` / `versionCode 27`; bundled glasses helper remains `0.1.10-preview.6` / `versionCode 16`.
+
 ## v0.1.15-preview.11 - 2026-06-29
 
 - Treated Android `SpeechRecognizer` error 11 (`ERROR_SERVER_DISCONNECTED`) as a transient Android CXR recognizer disconnect instead of surfacing the raw error code immediately.
