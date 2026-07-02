@@ -64,6 +64,33 @@ internal class AdbLoopbackClient(
         }
     }
 
+    fun requestAuthorization(keyMaterial: AdbKeyMaterial): ShellResult {
+        val socket = Socket()
+        return runCatching {
+            socket.soTimeout = timeoutMs
+            socket.connect(InetSocketAddress(host, port), timeoutMs)
+            val input = socket.getInputStream()
+            val output = socket.getOutputStream()
+            send(output, CMD_CNXN, ADB_VERSION, MAX_DATA, "host::\u0000".toByteArray(Charsets.UTF_8))
+            val requested = requestPublicKeyAuthorization(input, output, keyMaterial)
+            ShellResult(
+                connected = true,
+                authenticated = false,
+                commandSent = requested,
+                output = if (requested) "ADB public key authorization requested" else "ADB public key authorization failed",
+            )
+        }.getOrElse {
+            ShellResult(
+                connected = false,
+                authenticated = false,
+                commandSent = false,
+                output = it.message.orEmpty().ifBlank { it::class.java.simpleName },
+            )
+        }.also {
+            runCatching { socket.close() }
+        }
+    }
+
     private fun authenticate(input: InputStream, output: java.io.OutputStream, privateKey: PrivateKey): Boolean {
         var attempts = 0
         while (attempts < 3) {
@@ -72,14 +99,42 @@ internal class AdbLoopbackClient(
                 CMD_CNXN -> return true
                 CMD_AUTH -> {
                     if (message.arg0 != AUTH_TOKEN || message.data.isEmpty()) return false
-                    // Intentional: recovery only uses a key already trusted by adbd.
-                    // Do not send AUTH_RSAPUBLICKEY, which would request a new trust prompt.
+                    // Normal recovery is signing-only. The one-time public-key trust prompt is
+                    // requested explicitly through requestAuthorization() during provisioning.
                     val signature = when (attempts) {
                         0 -> AdbKeyMaterial.signSha1WithRsa(message.data, privateKey)
                         else -> AdbKeyMaterial.signAdbDigest(message.data, privateKey)
                     } ?: return false
                     attempts += 1
                     send(output, CMD_AUTH, AUTH_SIGNATURE, 0, signature)
+                }
+            }
+        }
+        return false
+    }
+
+    private fun requestPublicKeyAuthorization(
+        input: InputStream,
+        output: java.io.OutputStream,
+        keyMaterial: AdbKeyMaterial,
+    ): Boolean {
+        var signedOnce = false
+        repeat(3) {
+            val message = readMessage(input) ?: return false
+            when (message.command) {
+                CMD_CNXN -> return true
+                CMD_AUTH -> {
+                    if (message.arg0 != AUTH_TOKEN || message.data.isEmpty()) return false
+                    if (!signedOnce) {
+                        val signature = AdbKeyMaterial.signSha1WithRsa(message.data, keyMaterial.privateKey)
+                            ?: return false
+                        signedOnce = true
+                        send(output, CMD_AUTH, AUTH_SIGNATURE, 0, signature)
+                    } else {
+                        val publicKey = "${keyMaterial.publicKey.trim()}\u0000".toByteArray(Charsets.UTF_8)
+                        send(output, CMD_AUTH, AUTH_RSAPUBLICKEY, 0, publicKey)
+                        return true
+                    }
                 }
             }
         }
@@ -216,6 +271,7 @@ internal class AdbLoopbackClient(
         private const val WRITE_CHUNK_SIZE = 2048
         private const val AUTH_TOKEN = 1
         private const val AUTH_SIGNATURE = 2
+        private const val AUTH_RSAPUBLICKEY = 3
 
         private val CMD_CNXN = command("CNXN")
         private val CMD_AUTH = command("AUTH")

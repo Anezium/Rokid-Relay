@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.1.15-preview.15 - 2026-07-03
+
+- Made self-arm recovery setup possible from the phone by generating a per-install ADB recovery key in the phone app private files.
+- Added glasses-side ADB key enrollment during self-arm provisioning: the helper enables loopback ADB TCP, requests trust for the phone-generated public key, and retries watchdog startup after authorization.
+- Allowed the Relay Accessibility service to auto-accept the standard ADB authorization dialog only during first enrollment, only for expected system prompt packages, and only when the prompt contains the generated key fingerprint.
+- Rolled back failed first enrollment cleanly, including disabling ADB TCP again.
+- Reworded the phone setup row from `No key` / `Provisioning on next link` to `Key ready` / `Waiting for glasses link` / `Recovery armed`.
+- Bumped the phone app to `0.1.15-preview.15` / `versionCode 30` and the bundled glasses helper to `0.1.10-preview.8` / `versionCode 18`.
+
 ## v0.1.15-preview.14 - 2026-07-03
 
 - Cleared legacy phone-side `Self-arm recovery` states that could leave the setup row stuck on `Disable pending` after upgrading from earlier self-arm test builds.

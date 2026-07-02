@@ -14,12 +14,12 @@ object SelfArmProvisioner {
 
     fun buildProvision(context: Context): Provision {
         val appContext = context.applicationContext
-        val privateKey = privateKeyFile(appContext).takeIf { it.exists() }?.readText().orEmpty()
-        val publicKey = publicKeyFile(appContext).takeIf { it.exists() }?.readText().orEmpty()
+        val key = ensureKeyMaterial(appContext)
         return buildProvision(
             watchdogScript = readWatchdogScript(appContext),
-            privateKey = privateKey,
-            publicKey = publicKey,
+            privateKey = key.privateKeyPem,
+            publicKey = key.publicKey,
+            enrollmentAllowed = true,
         )
     }
 
@@ -27,6 +27,7 @@ object SelfArmProvisioner {
         watchdogScript: String,
         privateKey: String = "",
         publicKey: String = "",
+        enrollmentAllowed: Boolean = false,
     ): Provision {
         val keyPresent = privateKey.isNotBlank() && publicKey.isNotBlank()
         val json = JSONObject()
@@ -39,6 +40,7 @@ object SelfArmProvisioner {
             .put("watchdogVersion", Constants.SELF_ARM_WATCHDOG_VERSION)
             .put("watchdogScript", watchdogScript)
             .put("adbKeyProvisioned", keyPresent)
+            .put("adbEnrollmentAllowed", keyPresent && enrollmentAllowed)
         if (keyPresent) {
             json.put("adbPrivateKey", privateKey)
             json.put("adbPublicKey", publicKey)
@@ -109,8 +111,32 @@ object SelfArmProvisioner {
     }
 
     fun localKeyAvailable(context: Context): Boolean =
-        privateKeyFile(context.applicationContext).exists() &&
-            publicKeyFile(context.applicationContext).exists()
+        runCatching {
+            ensureKeyMaterial(context.applicationContext)
+            privateKeyFile(context.applicationContext).exists() &&
+                publicKeyFile(context.applicationContext).exists()
+        }.getOrDefault(false)
+
+    internal fun ensureKeyMaterial(context: Context): AdbKeyGenerator.GeneratedKey {
+        val privateFile = privateKeyFile(context)
+        val publicFile = publicKeyFile(context)
+        val privateKey = privateFile.takeIf { it.exists() }?.readText().orEmpty()
+        val publicKey = publicFile.takeIf { it.exists() }?.readText().orEmpty()
+        if (privateKey.isNotBlank() && publicKey.isNotBlank()) {
+            return AdbKeyGenerator.GeneratedKey(privateKey, publicKey)
+        }
+
+        val generated = AdbKeyGenerator.generate()
+        val dir = selfArmDir(context)
+        if (!dir.exists()) dir.mkdirs()
+        privateFile.writeText(generated.privateKeyPem)
+        publicFile.writeText(generated.publicKey)
+        privateFile.setReadable(true, true)
+        privateFile.setWritable(true, true)
+        publicFile.setReadable(true, true)
+        publicFile.setWritable(true, true)
+        return generated
+    }
 
     private fun readWatchdogScript(context: Context): String =
         context.assets.open(Constants.SELF_ARM_WATCHDOG_ASSET)

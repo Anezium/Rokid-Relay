@@ -1133,8 +1133,8 @@ class MainActivity : Activity() {
                 title = "Self-arm recovery",
                 value = when {
                     selfArmDisablePending -> "Disable pending"
-                    selfArmProvisioned -> "Self-arm provisioned"
-                    relayEnabled -> "Provisioning on next link"
+                    selfArmProvisioned -> "Recovery armed"
+                    relayEnabled -> "Waiting for glasses link"
                     else -> "Off"
                 },
                 tone = when {
@@ -1142,14 +1142,14 @@ class MainActivity : Activity() {
                     relayEnabled || selfArmDisablePending -> StatusTone.Waiting
                     else -> StatusTone.Neutral
                 },
-                actionLabel = if (selfArmKeyAvailable) "Ready" else "No key",
+                actionLabel = if (selfArmKeyAvailable) "Key ready" else "Key setup",
                 actionTone = ButtonTone.Secondary,
                 onClick = {
                     RelayBridge.setStatus(
                         if (selfArmKeyAvailable) {
-                            "Self-arm uses provisioned ADB key"
+                            "Self-arm phone ADB key ready"
                         } else {
-                            "Self-arm direct repair only until ADB key is provisioned"
+                            "Self-arm ADB key setup failed"
                         },
                     )
                     renderStatus()

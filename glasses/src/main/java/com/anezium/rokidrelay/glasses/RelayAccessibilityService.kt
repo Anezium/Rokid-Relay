@@ -18,6 +18,8 @@ import android.view.Gravity
 import android.view.KeyEvent
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
+import java.util.Locale
 
 class RelayAccessibilityService : AccessibilityService() {
     private val main = Handler(Looper.getMainLooper())
@@ -94,7 +96,9 @@ class RelayAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         serviceInfo = serviceInfo.apply {
-            flags = flags or AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
+            flags = flags or
+                AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS or
+                AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
         }
         RelayHudController.setNotificationOverlayYOffset(NotificationOverlaySettings.yOffsetDp(this))
         RelayHudController.setNotificationFontSizeSp(NotificationOverlaySettings.fontSizeSp(this))
@@ -105,7 +109,10 @@ class RelayAccessibilityService : AccessibilityService() {
         showOverlay()
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (event == null) return
+        maybeAcceptAdbAuthorizationDialog(event)
+    }
 
     override fun onInterrupt() = Unit
 
@@ -254,6 +261,105 @@ class RelayAccessibilityService : AccessibilityService() {
         main.postDelayed(runnable, RelayInputComboBuffer.DEFAULT_TIMEOUT_MS + COMMAND_VOLUME_CLEAR_MARGIN_MS)
     }
 
+    private fun maybeAcceptAdbAuthorizationDialog(event: AccessibilityEvent) {
+        if (!SelfArmController.adbAuthorizationPromptAllowed(this)) return
+        val root = rootInActiveWindow ?: return
+        if (!isSystemAdbPromptWindow(event, root)) return
+        val text = collectNodeText(root).joinToString(" ").lowercase(Locale.US)
+        val isAdbDialog = listOf(
+            "usb debugging",
+            "rsa key fingerprint",
+            "debogage usb",
+            "débogage usb",
+            "empreinte rsa",
+        ).any { it in text }
+        if (!isAdbDialog) return
+        if (!SelfArmController.adbAuthorizationPromptMatchesExpectedKey(this, text)) return
+
+        clickFirstMatching(root) { node ->
+            val nodeText = node.nodeText()
+            node.isCheckable && (
+                "always allow" in nodeText ||
+                    "toujours autoriser" in nodeText ||
+                    "always trust" in nodeText
+                )
+        }
+        val clicked = clickFirstMatching(root) { node ->
+            val nodeText = node.nodeText()
+            node.isClickable && (
+                nodeText == "ok" ||
+                    nodeText == "allow" ||
+                    nodeText == "autoriser" ||
+                    nodeText == "yes"
+                )
+        }
+        if (clicked) Log.i(TAG, "accepted ADB authorization dialog")
+    }
+
+    private fun isSystemAdbPromptWindow(event: AccessibilityEvent, root: AccessibilityNodeInfo): Boolean {
+        val packages = listOfNotNull(
+            event.packageName?.toString(),
+            root.packageName?.toString(),
+        ).map { it.lowercase(Locale.US) }
+        if (packages.none { it in ADB_AUTH_PROMPT_PACKAGES }) return false
+
+        val classes = listOfNotNull(
+            event.className?.toString(),
+            root.className?.toString(),
+        ).map { it.lowercase(Locale.US) }
+        if (classes.isEmpty()) return true
+        return classes.any { className ->
+            "usbdebugging" in className ||
+                "alertdialog" in className ||
+                "dialog" in className ||
+                "systemui" in className
+        }
+    }
+
+    private fun collectNodeText(node: AccessibilityNodeInfo): List<String> {
+        val values = mutableListOf<String>()
+        node.text?.toString()?.takeIf { it.isNotBlank() }?.let { values += it }
+        node.contentDescription?.toString()?.takeIf { it.isNotBlank() }?.let { values += it }
+        for (index in 0 until node.childCount) {
+            node.getChild(index)?.let { child ->
+                values += collectNodeText(child)
+            }
+        }
+        return values
+    }
+
+    private fun clickFirstMatching(
+        node: AccessibilityNodeInfo,
+        predicate: (AccessibilityNodeInfo) -> Boolean,
+    ): Boolean {
+        if (predicate(node)) {
+            val target = clickableNode(node)
+            if (target?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true) return true
+        }
+        for (index in 0 until node.childCount) {
+            node.getChild(index)?.let { child ->
+                if (clickFirstMatching(child, predicate)) return true
+            }
+        }
+        return false
+    }
+
+    private fun clickableNode(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        var current: AccessibilityNodeInfo? = node
+        repeat(4) {
+            val candidate = current ?: return null
+            if (candidate.isClickable) return candidate
+            current = candidate.parent
+        }
+        return null
+    }
+
+    private fun AccessibilityNodeInfo.nodeText(): String =
+        listOfNotNull(text?.toString(), contentDescription?.toString())
+            .joinToString(" ")
+            .trim()
+            .lowercase(Locale.US)
+
     private fun showOverlay() {
         main.post {
             if (overlay != null) return@post
@@ -375,6 +481,13 @@ class RelayAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val TAG = "RelayAccessibility"
+        private val ADB_AUTH_PROMPT_PACKAGES = setOf(
+            "android",
+            "com.android.settings",
+            "com.android.systemui",
+            "com.rokid.settings",
+            "com.rokid.systemui",
+        )
         private const val ACTION_TWO_FINGER_SWIPE_FORWARD =
             "com.android.action.ACTION_TWO_FINGER_SWIPE_FORWARD"
         private const val ACTION_TWO_FINGER_SWIPE_BACK =

@@ -32,17 +32,20 @@ recovery disabled until the glasses helper ACKs the request.
 
 ## Privileged Repair Paths
 
-The glasses app never ships a hardcoded ADB key. It will only use an ADB key if
-the phone already has both of these private files:
+The glasses app never ships a hardcoded ADB key. The phone companion generates
+a per-install recovery ADB key in its private app files when Relay is armed:
 
 - `<phone app files>/self-arm/adbkey`
 - `<phone app files>/self-arm/adbkey.pub`
 
-Those files must represent a key already authorized by the glasses. The key is
-sent only inside the local CXR provisioning payload and then stored in the
-glasses app private files. The loopback client signs ADB auth tokens with that
-key; it intentionally does not send `AUTH_RSAPUBLICKEY` to request a new trust
-prompt. No key material is committed to the repository.
+The key is sent only inside the local CXR provisioning payload and then stored
+in the glasses app private files. If the key is not already trusted by `adbd`,
+the glasses helper enables loopback ADB TCP, sends the public key once with
+`AUTH_RSAPUBLICKEY`, and waits for Android to trust it. The Relay Accessibility
+service can auto-accept the standard ADB authorization dialog when it is already
+enabled, the dialog belongs to an expected Android/Rokid system package, and the
+dialog text contains the expected fingerprint for the generated recovery key. No
+key material is committed to the repository.
 
 When a provisioned key exists and ADB loopback is listening on
 `127.0.0.1:5555`, the glasses app signs the ADB auth token, pushes the watchdog
@@ -55,7 +58,7 @@ sh /data/local/tmp/rokid-relay-a11y-watchdog.sh restart
 ```
 
 `persist.adb.tcp.port=5555` exposes ADB TCP on the glasses. ADB authentication
-still requires an authorized key, but this should be treated as a developer or
+still requires the generated recovery key, but this should be treated as a
 trusted-device recovery mode, not a general consumer default.
 
 If the app has `WRITE_SECURE_SETTINGS`, it also repairs

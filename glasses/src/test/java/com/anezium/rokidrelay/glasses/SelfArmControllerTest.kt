@@ -10,6 +10,8 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.RobolectricTestRunner
 import org.json.JSONObject
 import java.io.File
+import java.security.MessageDigest
+import java.util.Base64
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
@@ -39,6 +41,21 @@ class SelfArmControllerTest {
         assertTrue(command.contains("setprop service.adb.tcp.port 5555"))
         assertTrue(command.contains("cat > '${Constants.SELF_ARM_WATCHDOG_REMOTE_PATH}'"))
         assertTrue(command.contains("sh '${Constants.SELF_ARM_WATCHDOG_REMOTE_PATH}' start"))
+    }
+
+    @Test
+    fun adbPublicKeyFingerprintTokensUseDecodedAdbKeyBlob() {
+        val decoded = ByteArray(524) { index -> index.toByte() }
+        val publicKey = "${Base64.getEncoder().encodeToString(decoded)} relay-test"
+        val expectedMd5 = MessageDigest.getInstance("MD5")
+            .digest(decoded)
+            .joinToString(separator = "") { byte ->
+                Integer.toHexString(byte.toInt() and 0xff).padStart(2, '0')
+            }
+
+        val tokens = SelfArmController.adbPublicKeyFingerprintTokens(publicKey)
+
+        assertTrue(tokens.contains(expectedMd5))
     }
 
     @Test

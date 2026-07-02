@@ -23,7 +23,19 @@ class SelfArmProvisionerTest {
         assertFalse(provision.keyPresent)
         assertFalse(provision.json.has("adbPrivateKey"))
         assertFalse(provision.json.has("adbPublicKey"))
+        assertFalse(provision.json.getBoolean("adbEnrollmentAllowed"))
         assertTrue(provision.json.getString("watchdogScript").contains(Constants.CLIENT_PACKAGE))
+    }
+
+    @Test
+    fun contextProvisionGeneratesPhoneAdbKey() {
+        val context = RuntimeEnvironment.getApplication() as Context
+
+        val key = SelfArmProvisioner.ensureKeyMaterial(context)
+
+        assertTrue(key.privateKeyPem.contains("BEGIN PRIVATE KEY"))
+        assertTrue(key.publicKey.contains("rokid-relay@phone"))
+        assertTrue(SelfArmProvisioner.localKeyAvailable(context))
     }
 
     @Test
