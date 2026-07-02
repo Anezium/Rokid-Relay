@@ -44,4 +44,29 @@ class SelfArmProvisionerTest {
         assertFalse(SelfArmProvisioner.provisioned(context))
         assertFalse(SelfArmProvisioner.keyPresent(context))
     }
+
+    @Test
+    fun legacyPendingDisableWithoutProvisionIsCleared() {
+        val context = RuntimeEnvironment.getApplication() as Context
+        context.getSharedPreferences(Constants.PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(Constants.PREF_SELF_ARM_PROVISIONED, false)
+            .putBoolean(Constants.PREF_SELF_ARM_DISABLE_PENDING, true)
+            .apply()
+
+        assertFalse(SelfArmProvisioner.disablePending(context))
+        assertFalse(
+            context.getSharedPreferences(Constants.PREFS, Context.MODE_PRIVATE)
+                .getBoolean(Constants.PREF_SELF_ARM_DISABLE_PENDING, false),
+        )
+    }
+
+    @Test
+    fun newPendingDisableKeepsPendingState() {
+        val context = RuntimeEnvironment.getApplication() as Context
+
+        SelfArmProvisioner.markDisableRequested(context)
+
+        assertTrue(SelfArmProvisioner.disablePending(context))
+    }
 }

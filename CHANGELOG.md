@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.15-preview.14 - 2026-07-03
+
+- Cleared legacy phone-side `Self-arm recovery` states that could leave the setup row stuck on `Disable pending` after upgrading from earlier self-arm test builds.
+- Kept real disable requests tracked with a timestamp so confirmed pending disables still remain visible until the glasses ACKs them.
+- Bumped the phone app to `0.1.15-preview.14` / `versionCode 29`; bundled glasses helper remains `0.1.10-preview.7` / `versionCode 17`.
+
 ## v0.1.15-preview.13 - 2026-07-02
 
 - Added a Rokid RG 1.21.009 self-arm recovery path for the glasses Accessibility service, including a versioned `/data/local/tmp` watchdog script with `start`, `stop`, `restart`, `status`, and `repair` commands.

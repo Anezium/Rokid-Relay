@@ -5,6 +5,8 @@ import org.json.JSONObject
 import java.io.File
 
 object SelfArmProvisioner {
+    private const val PREF_DISABLE_REQUESTED_AT_MS = "self_arm_disable_requested_at_ms"
+
     data class Provision(
         val json: JSONObject,
         val keyPresent: Boolean,
@@ -57,6 +59,7 @@ object SelfArmProvisioner {
             .putBoolean(Constants.PREF_SELF_ARM_PROVISIONED, true)
             .putBoolean(Constants.PREF_SELF_ARM_KEY_PRESENT, keyPresent)
             .putBoolean(Constants.PREF_SELF_ARM_DISABLE_PENDING, false)
+            .remove(PREF_DISABLE_REQUESTED_AT_MS)
             .apply()
     }
 
@@ -66,6 +69,7 @@ object SelfArmProvisioner {
             .edit()
             .putBoolean(Constants.PREF_SELF_ARM_PROVISIONED, false)
             .putBoolean(Constants.PREF_SELF_ARM_DISABLE_PENDING, true)
+            .putLong(PREF_DISABLE_REQUESTED_AT_MS, System.currentTimeMillis())
             .apply()
     }
 
@@ -76,6 +80,7 @@ object SelfArmProvisioner {
             .putBoolean(Constants.PREF_SELF_ARM_PROVISIONED, false)
             .putBoolean(Constants.PREF_SELF_ARM_KEY_PRESENT, false)
             .putBoolean(Constants.PREF_SELF_ARM_DISABLE_PENDING, false)
+            .remove(PREF_DISABLE_REQUESTED_AT_MS)
             .apply()
     }
 
@@ -89,10 +94,19 @@ object SelfArmProvisioner {
             .getSharedPreferences(Constants.PREFS, Context.MODE_PRIVATE)
             .getBoolean(Constants.PREF_SELF_ARM_KEY_PRESENT, false)
 
-    fun disablePending(context: Context): Boolean =
-        context.applicationContext
+    fun disablePending(context: Context): Boolean {
+        val prefs = context.applicationContext
             .getSharedPreferences(Constants.PREFS, Context.MODE_PRIVATE)
-            .getBoolean(Constants.PREF_SELF_ARM_DISABLE_PENDING, false)
+        val pending = prefs.getBoolean(Constants.PREF_SELF_ARM_DISABLE_PENDING, false)
+        if (!pending) return false
+        if (prefs.contains(PREF_DISABLE_REQUESTED_AT_MS)) return true
+        if (prefs.getBoolean(Constants.PREF_SELF_ARM_PROVISIONED, false)) return true
+        prefs.edit()
+            .putBoolean(Constants.PREF_SELF_ARM_DISABLE_PENDING, false)
+            .remove(PREF_DISABLE_REQUESTED_AT_MS)
+            .apply()
+        return false
+    }
 
     fun localKeyAvailable(context: Context): Boolean =
         privateKeyFile(context.applicationContext).exists() &&
