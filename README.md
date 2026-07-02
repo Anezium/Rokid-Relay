@@ -422,6 +422,7 @@ Useful files:
 | Glasses controls and inbox combo | `glasses/src/main/java/com/rokid/relay/glasses/MainActivity.kt` and `glasses/src/main/java/com/rokid/relay/glasses/RelayAccessibilityService.kt` |
 | Glasses overlay layout | `glasses/src/main/java/com/rokid/relay/glasses/RelayHudView.kt` |
 | Shared channel names | `phone/src/main/java/com/rokid/relay/phone/Constants.kt` and `glasses/src/main/java/com/rokid/relay/glasses/Constants.kt` |
+| RG 1.21.009 accessibility recovery | `docs/self-arm-recovery.md` |
 
 If you change the glasses app, rebuild the phone debug APK too so the bundled `rokid-relay-glasses.apk` asset stays current.
 

@@ -1126,6 +1126,35 @@ class MainActivity : Activity() {
             ), matchWrap(top = 8))
             val relayEnabled = RelayStarter.isRelayEnabled(this)
             val relayRunning = RelayService.running
+            val selfArmProvisioned = SelfArmProvisioner.provisioned(this)
+            val selfArmDisablePending = SelfArmProvisioner.disablePending(this)
+            val selfArmKeyAvailable = SelfArmProvisioner.localKeyAvailable(this)
+            setupRows.addView(setupRow(
+                title = "Self-arm recovery",
+                value = when {
+                    selfArmDisablePending -> "Disable pending"
+                    selfArmProvisioned -> "Self-arm provisioned"
+                    relayEnabled -> "Provisioning on next link"
+                    else -> "Off"
+                },
+                tone = when {
+                    selfArmProvisioned -> StatusTone.Ready
+                    relayEnabled || selfArmDisablePending -> StatusTone.Waiting
+                    else -> StatusTone.Neutral
+                },
+                actionLabel = if (selfArmKeyAvailable) "Ready" else "No key",
+                actionTone = ButtonTone.Secondary,
+                onClick = {
+                    RelayBridge.setStatus(
+                        if (selfArmKeyAvailable) {
+                            "Self-arm uses provisioned ADB key"
+                        } else {
+                            "Self-arm direct repair only until ADB key is provisioned"
+                        },
+                    )
+                    renderStatus()
+                },
+            ), matchWrap(top = 8))
             setupRows.addView(setupRow(
                 title = "Relay service",
                 value = when {
@@ -1160,6 +1189,7 @@ class MainActivity : Activity() {
                 RelayService.running && NotificationForwardingPolicy.isPaused(this) ->
                     "Ready. Forwarding is paused while this screen is on."
                 RelayService.running -> "Awake. Relay will sleep again after the reply window."
+                SelfArmProvisioner.provisioned(this) -> "Armed. Self-arm provisioned for glasses recovery."
                 RelayStarter.isRelayEnabled(this) -> "Armed. Relay wakes on replyable notifications or inbox reply attempts."
                 else -> "Ready to arm wake-on-notification."
             }

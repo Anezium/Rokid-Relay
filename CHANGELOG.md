@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.15-preview.13 - 2026-07-02
+
+- Added a Rokid RG 1.21.009 self-arm recovery path for the glasses Accessibility service, including a versioned `/data/local/tmp` watchdog script with `start`, `stop`, `restart`, `status`, and `repair` commands.
+- Added glasses-side `SelfArmController` and `BootReceiver` so opening the glasses app or booting the device can repair Accessibility directly when `WRITE_SECURE_SETTINGS` is granted, or use a provisioned authorized ADB key over `127.0.0.1:5555`.
+- Added phone-side self-arm provisioning over the existing CXR-L command channel during manual arm/bootstrap, plus disable handling that clears the glasses `armed` flag and tries to stop the watchdog.
+- Documented the ADB TCP/key-security model in `docs/self-arm-recovery.md`; no ADB key material is generated, hardcoded, or committed.
+- Bumped the phone app to `0.1.15-preview.13` / `versionCode 28` and the bundled glasses helper to `0.1.10-preview.7` / `versionCode 17`.
+
 ## v0.1.15-preview.12 - 2026-06-30
 
 - Fixed Android CXR `Auto` language mode so it no longer sends the phone locale as an explicit `SpeechRecognizer` language hint.

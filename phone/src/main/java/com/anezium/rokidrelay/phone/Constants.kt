@@ -5,7 +5,11 @@ object Constants {
     const val COMPANION_REQUEST_CODE = 7204
     const val CLIENT_PACKAGE = "com.anezium.rokidrelay.glasses"
     const val CLIENT_MAIN_ACTIVITY = "com.anezium.rokidrelay.glasses.MainActivity"
+    const val CLIENT_ACCESSIBILITY_SERVICE =
+        "com.anezium.rokidrelay.glasses/com.anezium.rokidrelay.glasses.RelayAccessibilityService"
     const val CLIENT_ASSET_NAME = "rokid-relay-glasses.apk"
+    const val SELF_ARM_WATCHDOG_ASSET = "rokid-relay-a11y-watchdog.sh"
+    const val SELF_ARM_WATCHDOG_VERSION = "2026-07-02.2"
 
     const val KEY_EVENT = "rokid_relay.event"
     const val KEY_COMMAND = "rokid_relay.command"
@@ -54,6 +58,9 @@ object Constants {
     const val PREF_NOTIFICATION_OVERLAY_Y_OFFSET_DP = "notification_overlay_y_offset_dp"
     const val PREF_CLIENT_APK_FINGERPRINT = "client_apk_fingerprint"
     const val PREF_CLIENT_NEEDS_FOREGROUND_LAUNCH = "client_needs_foreground_launch"
+    const val PREF_SELF_ARM_PROVISIONED = "self_arm_provisioned"
+    const val PREF_SELF_ARM_KEY_PRESENT = "self_arm_key_present"
+    const val PREF_SELF_ARM_DISABLE_PENDING = "self_arm_disable_pending"
 
     const val TEST_NOTIFICATION_ID = 7202
     const val TEST_NOTIFICATION_SECOND_THREAD_ID = 7203

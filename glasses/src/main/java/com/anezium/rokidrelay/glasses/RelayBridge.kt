@@ -226,6 +226,35 @@ object RelayBridge {
             }
             "phone_sleeping" -> RelayHudController.phoneSleeping()
             "settings" -> applySettings(obj)
+            "self_arm_provision" -> appContext?.let { context ->
+                Thread {
+                    val result = SelfArmController.provision(context, obj)
+                    main.post {
+                        sendCommand("self_arm_status") {
+                            put("provisioned", result.recoveryStarted)
+                            put("accepted", result.accepted)
+                            put("disabled", false)
+                            put("adbKeyProvisioned", SelfArmController.hasProvisionedKey(context))
+                            put("watchdogVersion", Constants.SELF_ARM_WATCHDOG_VERSION)
+                        }
+                    }
+                }.apply {
+                    name = "RokidRelaySelfArmProvision"
+                    start()
+                }
+            }
+            "self_arm_disable" -> appContext?.let {
+                SelfArmController.disable(it) { disabled ->
+                    main.post {
+                        sendCommand("self_arm_status") {
+                            put("provisioned", false)
+                            put("disabled", disabled)
+                            put("adbKeyProvisioned", SelfArmController.hasProvisionedKey(it))
+                            put("watchdogVersion", Constants.SELF_ARM_WATCHDOG_VERSION)
+                        }
+                    }
+                }
+            }
             "notification" -> {
                 applySettings(obj)
                 RelayHudController.showNotification(

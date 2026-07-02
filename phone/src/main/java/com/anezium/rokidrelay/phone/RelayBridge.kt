@@ -28,13 +28,17 @@ object RelayBridge {
         val vadPeakAbs: Int,
         val vadSpeechDetected: Boolean,
         val lastVoiceError: String,
+        val selfArmStatus: String,
+        val selfArmKeyPresent: Boolean,
     )
 
     private const val TAG = "RokidRelayBridge"
     private const val RECONNECT_INITIAL_DELAY_MS = 1_000L
     private const val RECONNECT_MAX_DELAY_MS = 120_000L
     private const val FOREGROUND_OPEN_WINDOW_MS = 30_000L
+    private const val SELF_ARM_DISABLE_ACK_TIMEOUT_MS = 12_000L
     private val main = Handler(Looper.getMainLooper())
+    private val disableWaitLock = Any()
 
     @Volatile private var cxrConnected = false
     @Volatile private var glassConnected = false
@@ -49,6 +53,8 @@ object RelayBridge {
     @Volatile private var vadPeakAbs = 0
     @Volatile private var vadSpeechDetected = false
     @Volatile private var lastVoiceError = ""
+    @Volatile private var selfArmStatus = "not provisioned"
+    @Volatile private var selfArmKeyPresent = false
     @Volatile private var bootstrapStarted = false
     @Volatile private var bootstrapInFlight = false
     @Volatile private var bootstrapReadyForMessages = false
@@ -59,6 +65,8 @@ object RelayBridge {
     @Volatile private var pendingWakeVoiceNotificationId = ""
     @Volatile private var reconnectRunnable: Runnable? = null
     @Volatile private var foregroundOpenRunnable: Runnable? = null
+    @Volatile private var pendingDisableCompletion: (() -> Unit)? = null
+    @Volatile private var pendingDisableTimeout: Runnable? = null
     private var reconnectDelayMs = RECONNECT_INITIAL_DELAY_MS
 
     private var appContext: Context? = null
@@ -157,6 +165,8 @@ object RelayBridge {
         vadPeakAbs = vadPeakAbs,
         vadSpeechDetected = vadSpeechDetected,
         lastVoiceError = lastVoiceError,
+        selfArmStatus = selfArmStatus,
+        selfArmKeyPresent = selfArmKeyPresent,
     )
 
     fun sendNotification(reply: ReplyRepository.PendingReply) {
@@ -292,6 +302,28 @@ object RelayBridge {
                 .put("source", "phone")
                 .put("reason", reason),
         )
+    }
+
+    fun disableSelfArmBestEffort(context: Context? = null, onComplete: (() -> Unit)? = null) {
+        if (onComplete != null) registerDisableCompletion(onComplete)
+        val targetContext = context?.applicationContext ?: appContext
+        val hadProvisionedRecovery = targetContext?.let {
+            SelfArmProvisioner.provisioned(it) || SelfArmProvisioner.disablePending(it)
+        } == true
+        if (targetContext != null && hadProvisionedRecovery) {
+            SelfArmProvisioner.markDisableRequested(targetContext)
+        }
+        val sent = sendJsonBestEffort(Constants.KEY_EVENT, SelfArmProvisioner.disablePayload())
+        if (!sent && !hadProvisionedRecovery) {
+            targetContext?.let { SelfArmProvisioner.markDisabled(it) }
+            completePendingDisableWait()
+        }
+        selfArmStatus = when {
+            sent -> "Self-arm disable sent"
+            hadProvisionedRecovery -> "Self-arm disable pending"
+            else -> "Self-arm not provisioned"
+        }
+        lastStatus = selfArmStatus
     }
 
     private fun startOnMain(context: Context, token: String, allowForegroundOpen: Boolean = false) {
@@ -471,6 +503,12 @@ object RelayBridge {
             bootstrapState = result.status
             lastStatus = result.status
             sendState()
+            if (result.success && result.readyForMessages) {
+                main.postDelayed(
+                    { provisionSelfArmIfArmed() },
+                    if (result.openedClient) 1_000L else 0L,
+                )
+            }
             if (rerunForForegroundOpen) {
                 main.post { maybeBootstrap(allowForegroundOpen = true) }
             } else if (result.success && result.readyForMessages) {
@@ -513,7 +551,10 @@ object RelayBridge {
         val type = json.optString("type")
         val context = appContext ?: return
         when (type) {
-            "request_state" -> sendState()
+            "request_state" -> {
+                sendState()
+                provisionSelfArmIfArmed()
+            }
             "start_voice" -> {
                 val id = json.optString("notificationId")
                 val localLink = link
@@ -542,6 +583,34 @@ object RelayBridge {
                 VoiceController.cancel()
                 RelayService.scheduleIdleStop()
             }
+            "self_arm_status" -> {
+                val provisioned = json.optBoolean("provisioned")
+                val disabled = json.optBoolean("disabled")
+                val keyPresent = json.optBoolean("adbKeyProvisioned")
+                val accepted = json.optBoolean("accepted")
+                selfArmKeyPresent = keyPresent
+                if (disabled) {
+                    SelfArmProvisioner.markDisabled(context)
+                    selfArmStatus = "Self-arm disabled"
+                    selfArmKeyPresent = false
+                    lastStatus = selfArmStatus
+                    completePendingDisableWait()
+                } else if (provisioned) {
+                    SelfArmProvisioner.markProvisioned(context, keyPresent)
+                    selfArmStatus = "Self-arm provisioned"
+                    lastStatus = selfArmStatus
+                } else if (accepted) {
+                    selfArmStatus = "Self-arm start failed"
+                    lastStatus = selfArmStatus
+                } else {
+                    selfArmStatus = if (SelfArmProvisioner.disablePending(context)) {
+                        "Self-arm disable pending"
+                    } else {
+                        "Self-arm rejected"
+                    }
+                    lastStatus = selfArmStatus
+                }
+            }
             "dismiss_notification" -> {
                 val id = json.optString("notificationId")
                 ReplyRepository.forget(id)
@@ -558,6 +627,34 @@ object RelayBridge {
         }
     }
 
+    private fun registerDisableCompletion(onComplete: () -> Unit) {
+        val timeout = Runnable {
+            selfArmStatus = "Self-arm disable pending"
+            lastStatus = selfArmStatus
+            completePendingDisableWait()
+        }
+        val previous = synchronized(disableWaitLock) {
+            val current = pendingDisableCompletion
+            pendingDisableTimeout?.let { main.removeCallbacks(it) }
+            pendingDisableCompletion = onComplete
+            pendingDisableTimeout = timeout
+            current
+        }
+        previous?.let { main.post(it) }
+        main.postDelayed(timeout, SELF_ARM_DISABLE_ACK_TIMEOUT_MS)
+    }
+
+    private fun completePendingDisableWait() {
+        val completion = synchronized(disableWaitLock) {
+            val current = pendingDisableCompletion
+            pendingDisableCompletion = null
+            pendingDisableTimeout?.let { main.removeCallbacks(it) }
+            pendingDisableTimeout = null
+            current
+        } ?: return
+        main.post(completion)
+    }
+
     private fun sendState() {
         sendJson(
             Constants.KEY_EVENT,
@@ -571,6 +668,24 @@ object RelayBridge {
                 .appendUserSettings(),
         )
         sendInbox()
+    }
+
+    private fun provisionSelfArmIfArmed() {
+        val context = appContext ?: return
+        if (!RelayStarter.isRelayEnabled(context)) return
+        val provision = runCatching { SelfArmProvisioner.buildProvision(context) }.getOrElse {
+            Log.w(TAG, "self-arm provision payload failed: ${it.message}")
+            selfArmStatus = "Self-arm provision failed"
+            return
+        }
+        val sent = sendJson(Constants.KEY_EVENT, provision.json)
+        selfArmKeyPresent = provision.keyPresent
+        if (sent) {
+            selfArmStatus = "Self-arm provisioning sent"
+            lastStatus = selfArmStatus
+        } else {
+            selfArmStatus = "Self-arm provisioning queued"
+        }
     }
 
     private fun JSONObject.appendUserSettings(): JSONObject {

@@ -118,11 +118,12 @@ object RelayStarter {
     }
 
     fun stop(context: Context) {
-        setRelayEnabled(context.applicationContext, false)
+        val appContext = context.applicationContext
+        setRelayEnabled(appContext, false)
         BleWakeServer.stop()
         runCatching {
-            context.applicationContext.startService(
-                Intent(context.applicationContext, RelayService::class.java)
+            appContext.startService(
+                Intent(appContext, RelayService::class.java)
                     .setAction(Constants.ACTION_STOP),
             )
         }.onFailure {

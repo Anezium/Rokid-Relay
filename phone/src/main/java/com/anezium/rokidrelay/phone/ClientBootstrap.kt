@@ -38,6 +38,9 @@ class ClientBootstrap(
                     readyForMessages = false,
                 )
             }
+            if (openAfterInstall) {
+                return openClient(successStatus = "glasses app started")
+            }
             return Result(
                 "glasses app ready in background",
                 success = true,

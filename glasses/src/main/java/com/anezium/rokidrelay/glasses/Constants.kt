@@ -1,6 +1,15 @@
 package com.anezium.rokidrelay.glasses
 
 object Constants {
+    const val CLIENT_PACKAGE = "com.anezium.rokidrelay.glasses"
+    const val CLIENT_MAIN_ACTIVITY = "com.anezium.rokidrelay.glasses.MainActivity"
+    const val ACCESSIBILITY_SERVICE =
+        "com.anezium.rokidrelay.glasses/com.anezium.rokidrelay.glasses.RelayAccessibilityService"
+    const val SELF_ARM_WATCHDOG_ASSET = "rokid-relay-a11y-watchdog.sh"
+    const val SELF_ARM_WATCHDOG_NAME = "rokid-relay-a11y-watchdog"
+    const val SELF_ARM_WATCHDOG_VERSION = "2026-07-02.2"
+    const val SELF_ARM_WATCHDOG_REMOTE_PATH = "/data/local/tmp/rokid-relay-a11y-watchdog.sh"
+
     const val KEY_EVENT = "rokid_relay.event"
     const val KEY_COMMAND = "rokid_relay.command"
     const val KEY_MEDIA = "rokid_relay.media"

@@ -43,9 +43,11 @@ class RelayService : Service() {
                 BleWakeServer.stop()
                 microphoneForegroundRequested = false
                 cancelIdleStop()
-                RelayBridge.stop()
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
+                RelayBridge.disableSelfArmBestEffort(this) {
+                    RelayBridge.stop()
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf(startId)
+                }
                 return START_NOT_STICKY
             }
             else -> {

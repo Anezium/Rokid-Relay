@@ -38,13 +38,22 @@ class MainActivity : Activity() {
         RelayHudController.setNotificationOverlayYOffset(NotificationOverlaySettings.yOffsetDp(this))
         RelayHudController.setNotificationFontSizeSp(NotificationOverlaySettings.fontSizeSp(this))
         RelayHudController.refreshAccessibility(this)
+        SelfArmController.allowProvisionFromForeground(this)
         RelayBridge.start(this)
+        SelfArmController.maybeStart(this, "main_activity")
         requestBluetoothPermissionsIfNeeded()
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        refreshSelfArmFromForeground("main_activity_new_intent")
     }
 
     override fun onResume() {
         super.onResume()
         RelayHudController.refreshAccessibility(this)
+        refreshSelfArmFromForeground("main_activity_resume")
         main.removeCallbacks(accessibilityRefreshRunnable)
         main.postDelayed(accessibilityRefreshRunnable, ACCESSIBILITY_REFRESH_MS)
     }
@@ -128,6 +137,11 @@ class MainActivity : Activity() {
         if (!opened) {
             runCatching { startActivity(Intent(Settings.ACTION_SETTINGS)) }
         }
+    }
+
+    private fun refreshSelfArmFromForeground(reason: String) {
+        SelfArmController.allowProvisionFromForeground(this)
+        SelfArmController.maybeStart(this, reason)
     }
 
     private fun requestBluetoothPermissionsIfNeeded() {

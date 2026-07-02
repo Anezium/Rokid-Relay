@@ -110,6 +110,7 @@ class DiagnosticsPanel(
             appendLine("CXR-L: ${if (snapshot.cxrConnected) "connected" else "disconnected"}")
             appendLine("Glasses BT: ${if (snapshot.glassConnected) "connected" else "waiting"}")
             appendLine("Glasses app: ${snapshot.bootstrapState}")
+            appendLine("Self-arm: ${snapshot.selfArmStatus} key=${snapshot.selfArmKeyPresent}")
             appendLine("Mic foreground: ${if (RelayService.microphoneForegroundActive) "active" else "off"}")
             if (!RelayService.microphoneForegroundActive && RelayService.lastMicrophoneForegroundError.isNotBlank()) {
                 appendLine("Mic foreground error: ${RelayService.lastMicrophoneForegroundError}")
