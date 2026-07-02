@@ -150,6 +150,7 @@ object RelayStarter {
     }
 
     const val START_REASON_MANUAL = "manual_start"
+    const val START_REASON_SELF_ARM = "self_arm_recovery"
     const val START_REASON_NOTIFICATION = "notification_posted"
     const val START_REASON_BLE_WAKE_REPLY = "ble_wake_reply"
 }
@@ -157,6 +158,7 @@ object RelayStarter {
 internal fun isUserInitiatedRelayStart(reason: String): Boolean =
     when (reason) {
         RelayStarter.START_REASON_MANUAL,
+        RelayStarter.START_REASON_SELF_ARM,
         "authorization",
         "permissions",
         "stt_engine",

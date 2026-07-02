@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.1.15-preview.16 - 2026-07-03
+
+- Fixed the phone Self-arm recovery row so `Waiting for glasses link` is no longer passive: tapping it now actively retries the self-arm CXR/glasses provisioning path.
+- Auto-started self-arm provisioning when the phone app opens with Relay already enabled, a Hi Rokid auth token present, self-arm not yet provisioned, and no disable pending.
+- Let self-arm provisioning use its own foreground-start reason so recovery setup can open the glasses link even when normal speech/STT setup is not complete.
+- Cleared pending self-arm authorization actions if Hi Rokid authorization is already in flight, unavailable, or fails to open.
+- Allowed the first automatic self-arm retry immediately, then throttled subsequent retries to avoid noisy repeated starts.
+- Confirmed the stuck-state recovery on device by clearing `self_arm_provisioned` while keeping the auth token/key and `relay_enabled=true`; opening the phone app restored `self_arm_provisioned=true` after the glasses ACK.
+- Bumped the phone app to `0.1.15-preview.16` / `versionCode 31`; bundled glasses helper remains `0.1.10-preview.8` / `versionCode 18`.
+
 ## v0.1.15-preview.15 - 2026-07-03
 
 - Made self-arm recovery setup possible from the phone by generating a per-install ADB recovery key in the phone app private files.

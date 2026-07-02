@@ -16,9 +16,11 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
+import android.os.SystemClock
 import android.provider.Settings
 import android.text.InputType
 import android.text.TextUtils
+import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -98,6 +100,7 @@ class MainActivity : Activity() {
     private var authRequestInFlight = false
     private var autoReauthAttempted = false
     private var armRelayAfterAuth = false
+    private var selfArmAfterAuth = false
     private var apiKeysVisible = false
     private var selectedTab = AppTab.HOME
     private var modernBackCallback: OnBackInvokedCallback? = null
@@ -105,9 +108,11 @@ class MainActivity : Activity() {
     private var notificationFontSizeInputSaving = false
     private var updateNotesExpanded = false
     private var lastRenderedReleaseNotes = ""
+    private var lastSelfArmAutoPrepareAtMs = 0L
 
     private val pollStatus = object : Runnable {
         override fun run() {
+            maybeAutoPrepareSelfArmRecovery()
             renderStatus()
             handler.postDelayed(this, 1000L)
         }
@@ -133,6 +138,7 @@ class MainActivity : Activity() {
             if (RelayStarter.isRelayEnabled(this)) {
                 CompanionDeviceCoordinator.startObserving(this)
                 BleWakeServer.ensureStarted(this)
+                maybeAutoPrepareSelfArmRecovery()
             }
             if (RelayService.running) {
                 RelayService.refreshForeground()
@@ -187,13 +193,22 @@ class MainActivity : Activity() {
         if (requestCode != Constants.AUTH_REQUEST_CODE) return
         authRequestInFlight = false
         val shouldArmRelay = armRelayAfterAuth
+        val shouldPrepareSelfArm = selfArmAfterAuth
         armRelayAfterAuth = false
+        selfArmAfterAuth = false
 
         val notice = when (val result = CxrLAuth.parseAuthorizationResult(resultCode, data)) {
             is CxrLAuth.Result.Success -> {
                 prefs().edit().putString(Constants.PREF_AUTH_TOKEN, result.token).apply()
                 autoReauthAttempted = false
                 when {
+                    shouldPrepareSelfArm -> {
+                        if (prepareSelfArmRecoveryLink()) {
+                            "Hi Rokid authorized. Self-arm provisioning started."
+                        } else {
+                            "Hi Rokid authorized. Self-arm provisioning could not start."
+                        }
+                    }
                     shouldArmRelay -> {
                         if (armRelayAfterSetupReady()) {
                             "Hi Rokid authorized. Relay armed."
@@ -1142,16 +1157,14 @@ class MainActivity : Activity() {
                     relayEnabled || selfArmDisablePending -> StatusTone.Waiting
                     else -> StatusTone.Neutral
                 },
-                actionLabel = if (selfArmKeyAvailable) "Key ready" else "Key setup",
+                actionLabel = when {
+                    selfArmProvisioned -> "Re-arm"
+                    relayEnabled -> "Retry"
+                    else -> "Arm"
+                },
                 actionTone = ButtonTone.Secondary,
                 onClick = {
-                    RelayBridge.setStatus(
-                        if (selfArmKeyAvailable) {
-                            "Self-arm phone ADB key ready"
-                        } else {
-                            "Self-arm ADB key setup failed"
-                        },
-                    )
+                    prepareSelfArmRecoveryOrAuthorize()
                     renderStatus()
                 },
             ), matchWrap(top = 8))
@@ -1958,6 +1971,45 @@ class MainActivity : Activity() {
         return true
     }
 
+    private fun prepareSelfArmRecoveryOrAuthorize() {
+        if (savedAuthToken().isNullOrBlank()) {
+            selfArmAfterAuth = true
+            requestHiRokidAuthorization(auto = false, reason = RelayStarter.START_REASON_SELF_ARM)
+            return
+        }
+        if (prepareSelfArmRecoveryLink()) {
+            toastLine("Self-arm provisioning started")
+        } else {
+            toastLine("Self-arm provisioning could not start")
+        }
+    }
+
+    private fun prepareSelfArmRecoveryLink(): Boolean {
+        Log.i(TAG_SELF_ARM, "starting self-arm provisioning link")
+        if (!RelayStarter.armAndPrepare(this, RelayStarter.START_REASON_SELF_ARM)) {
+            Log.w(TAG_SELF_ARM, "self-arm provisioning link could not start")
+            return false
+        }
+        CompanionDeviceCoordinator.startObserving(this)
+        BleWakeServer.ensureStarted(this)
+        RelayBridge.setStatus("Self-arm provisioning: opening glasses link")
+        lastSelfArmAutoPrepareAtMs = SystemClock.elapsedRealtime()
+        Log.i(TAG_SELF_ARM, "self-arm provisioning link started")
+        return true
+    }
+
+    private fun maybeAutoPrepareSelfArmRecovery() {
+        if (!RelayStarter.isRelayEnabled(this)) return
+        if (SelfArmProvisioner.provisioned(this) || SelfArmProvisioner.disablePending(this)) return
+        if (savedAuthToken().isNullOrBlank()) return
+        val now = SystemClock.elapsedRealtime()
+        if (
+            lastSelfArmAutoPrepareAtMs > 0L &&
+            now - lastSelfArmAutoPrepareAtMs < SELF_ARM_AUTO_PREPARE_INTERVAL_MS
+        ) return
+        prepareSelfArmRecoveryLink()
+    }
+
     private fun syncSettingsAfterUserChange() {
         if (RelayService.running) {
             RelayBridge.sendSettings()
@@ -1977,21 +2029,33 @@ class MainActivity : Activity() {
         requestHiRokidAuthorization(auto = true, reason = "bind_failed")
     }
 
-    private fun requestHiRokidAuthorization(auto: Boolean, reason: String) {
-        if (authRequestInFlight) return
+    private fun requestHiRokidAuthorization(auto: Boolean, reason: String): Boolean {
+        if (authRequestInFlight) {
+            clearPendingAuthAction(reason)
+            return false
+        }
         if (!CxrLAuth.isGlobalHiRokidInstalled(this)) {
-            if (reason == RelayStarter.START_REASON_MANUAL) armRelayAfterAuth = false
+            clearPendingAuthAction(reason)
             toastLine("Hi Rokid Global is not visible to Rokid Relay")
-            return
+            return false
         }
         authRequestInFlight = true
         RelayBridge.setStatus(if (auto) "opening Hi Rokid authorization" else "authorization requested")
         val error = CxrLAuth.requestAuthorization(this, Constants.AUTH_REQUEST_CODE)
         if (error is CxrLAuth.Result.Fail) {
             authRequestInFlight = false
-            if (reason == RelayStarter.START_REASON_MANUAL) armRelayAfterAuth = false
+            clearPendingAuthAction(reason)
             toastLine("Authorization failed to open: ${error.reason}")
             RelayBridge.setStatus("authorization failed to open: $reason")
+            return false
+        }
+        return true
+    }
+
+    private fun clearPendingAuthAction(reason: String) {
+        when (reason) {
+            RelayStarter.START_REASON_MANUAL -> armRelayAfterAuth = false
+            RelayStarter.START_REASON_SELF_ARM -> selfArmAfterAuth = false
         }
     }
 
@@ -2124,7 +2188,9 @@ class MainActivity : Activity() {
     }
 
     private companion object {
+        private const val TAG_SELF_ARM = "RokidRelaySelfArm"
         private const val FOREGROUND_REFRESH_DELAY_MS = 250L
+        private const val SELF_ARM_AUTO_PREPARE_INTERVAL_MS = 30_000L
         private const val LANGUAGE_GRID_COLUMNS = 3
         val COLOR_APP_BG: Int = Color.rgb(4, 10, 6)
         val COLOR_PANEL: Int = Color.rgb(8, 18, 11)
