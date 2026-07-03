@@ -94,6 +94,34 @@ object RelayStarter {
     fun start(context: Context, token: String, reason: String): Boolean =
         start(context, token, reason, persistEnabled = true)
 
+    fun relaunch(context: Context): Boolean {
+        val appContext = context.applicationContext
+        setRelayEnabled(appContext, true)
+        val token = authToken(appContext)
+        if (token.isNullOrBlank()) {
+            RelayBridge.setStatus("relay relaunch skipped: missing auth token")
+            return false
+        }
+        val intent = Intent(appContext, RelayService::class.java)
+            .setAction(Constants.ACTION_RELAUNCH)
+            .putExtra(Constants.EXTRA_TOKEN, token)
+            .putExtra(Constants.EXTRA_START_REASON, START_REASON_RELAUNCH)
+        return runCatching {
+            BleWakeServer.ensureStarted(appContext)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                appContext.startForegroundService(intent)
+            } else {
+                appContext.startService(intent)
+            }
+            RelayBridge.setStatus("relay relaunching")
+            true
+        }.getOrElse {
+            Log.w(TAG, "relay relaunch failed: ${it.message}")
+            RelayBridge.setStatus("relay relaunch blocked")
+            false
+        }
+    }
+
     private fun start(context: Context, token: String, reason: String, persistEnabled: Boolean): Boolean {
         val appContext = context.applicationContext
         val intent = Intent(appContext, RelayService::class.java)
@@ -150,6 +178,7 @@ object RelayStarter {
     }
 
     const val START_REASON_MANUAL = "manual_start"
+    const val START_REASON_RELAUNCH = "manual_relaunch"
     const val START_REASON_SELF_ARM = "self_arm_recovery"
     const val START_REASON_NOTIFICATION = "notification_posted"
     const val START_REASON_BLE_WAKE_REPLY = "ble_wake_reply"
@@ -158,6 +187,7 @@ object RelayStarter {
 internal fun isUserInitiatedRelayStart(reason: String): Boolean =
     when (reason) {
         RelayStarter.START_REASON_MANUAL,
+        RelayStarter.START_REASON_RELAUNCH,
         RelayStarter.START_REASON_SELF_ARM,
         "authorization",
         "permissions",

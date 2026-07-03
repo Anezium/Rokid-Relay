@@ -20,6 +20,7 @@ object Constants {
 
     const val ACTION_START = "com.anezium.rokidrelay.phone.START"
     const val ACTION_STOP = "com.anezium.rokidrelay.phone.STOP"
+    const val ACTION_RELAUNCH = "com.anezium.rokidrelay.phone.RELAUNCH"
     const val ACTION_POST_TEST_NOTIFICATION = "com.anezium.rokidrelay.phone.POST_TEST_NOTIFICATION"
     const val ACTION_TEST_REPLY = "com.anezium.rokidrelay.phone.TEST_REPLY"
     const val EXTRA_TOKEN = "token"

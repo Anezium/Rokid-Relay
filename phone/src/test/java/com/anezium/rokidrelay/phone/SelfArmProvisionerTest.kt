@@ -8,6 +8,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.RobolectricTestRunner
+import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
 class SelfArmProvisionerTest {
@@ -36,6 +37,15 @@ class SelfArmProvisionerTest {
         assertTrue(key.privateKeyPem.contains("BEGIN PRIVATE KEY"))
         assertTrue(key.publicKey.contains("rokid-relay@phone"))
         assertTrue(SelfArmProvisioner.localKeyAvailable(context))
+    }
+
+    @Test
+    fun localKeyAvailableDoesNotGeneratePhoneAdbKey() {
+        val context = RuntimeEnvironment.getApplication() as Context
+        File(context.filesDir, "self-arm").deleteRecursively()
+
+        assertFalse(SelfArmProvisioner.localKeyAvailable(context))
+        assertFalse(File(context.filesDir, "self-arm").exists())
     }
 
     @Test

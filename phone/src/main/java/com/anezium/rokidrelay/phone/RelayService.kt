@@ -50,6 +50,29 @@ class RelayService : Service() {
                 }
                 return START_NOT_STICKY
             }
+            Constants.ACTION_RELAUNCH -> {
+                if (!RelayStarter.isRelayEnabled(this)) {
+                    RelayStarter.setRelayEnabled(this, true)
+                }
+                val token = intent.getStringExtra(Constants.EXTRA_TOKEN)
+                    ?: getSharedPreferences(Constants.PREFS, MODE_PRIVATE)
+                        .getString(Constants.PREF_AUTH_TOKEN, null)
+                val reason = intent.getStringExtra(Constants.EXTRA_START_REASON)
+                    ?: RelayStarter.START_REASON_RELAUNCH
+                if (!token.isNullOrBlank()) {
+                    cancelIdleStop()
+                    RelayBridge.setStatus("relay relaunching")
+                    RelayBridge.stop()
+                    BleWakeServer.ensureStarted(this)
+                    RelayBridge.start(applicationContext, token, reason)
+                    scheduleIdleStop()
+                } else {
+                    RelayBridge.setStatus("relay relaunch skipped: missing auth token")
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf(startId)
+                    return START_NOT_STICKY
+                }
+            }
             else -> {
                 if (!RelayStarter.isRelayEnabled(this)) {
                     RelayBridge.setStatus("relay not started: disabled")

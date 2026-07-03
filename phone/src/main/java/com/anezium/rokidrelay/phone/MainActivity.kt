@@ -1141,9 +1141,13 @@ class MainActivity : Activity() {
             ), matchWrap(top = 8))
             val relayEnabled = RelayStarter.isRelayEnabled(this)
             val relayRunning = RelayService.running
+            val relayOperational = relayRunning &&
+                snap.cxrConnected &&
+                snap.glassConnected &&
+                snap.bootstrapReadyForMessages
+            val relayNotificationAccessMissing = relayEnabled && !notifications
             val selfArmProvisioned = SelfArmProvisioner.provisioned(this)
             val selfArmDisablePending = SelfArmProvisioner.disablePending(this)
-            val selfArmKeyAvailable = SelfArmProvisioner.localKeyAvailable(this)
             setupRows.addView(setupRow(
                 title = "Self-arm recovery",
                 value = when {
@@ -1171,11 +1175,18 @@ class MainActivity : Activity() {
             setupRows.addView(setupRow(
                 title = "Relay service",
                 value = when {
-                    relayRunning -> "Awake for notification"
+                    relayNotificationAccessMissing -> "Armed, notification access missing"
+                    relayOperational -> "Operational"
+                    relayRunning && snap.cxrConnected && snap.glassConnected -> "Connected, preparing glasses app"
+                    relayRunning -> "Running, ${snap.bootstrapState}"
                     relayEnabled -> "Armed for notification/reply"
                     else -> "Stopped"
                 },
-                tone = if (relayRunning) StatusTone.Ready else StatusTone.Neutral,
+                tone = when {
+                    relayOperational -> StatusTone.Ready
+                    relayRunning || relayEnabled -> StatusTone.Waiting
+                    else -> StatusTone.Neutral
+                },
                 actionLabel = if (relayRunning || relayEnabled) "Stop" else "Start",
                 actionTone = if (relayRunning || relayEnabled) ButtonTone.Danger else ButtonTone.Primary,
                 onClick = {
@@ -1187,12 +1198,27 @@ class MainActivity : Activity() {
                     renderStatus()
                 },
             ), matchWrap(top = 8))
+            if (relayRunning || relayEnabled) {
+                setupRows.addView(setupRow(
+                    title = "Relay recovery",
+                    value = if (relayOperational) "Bridge is operational" else "Restart service and bridge",
+                    tone = if (relayOperational) StatusTone.Neutral else StatusTone.Waiting,
+                    actionLabel = "Relaunch",
+                    actionTone = if (relayOperational) ButtonTone.Secondary else ButtonTone.Primary,
+                    onClick = {
+                        relaunchRelayOrAuthorize()
+                        renderStatus()
+                    },
+                ), matchWrap(top = 8))
+            }
         }
 
         if (::noticeText.isInitialized) {
             noticeText.text = when {
                 !hiRokid -> "Install or expose Hi Rokid Global first."
                 !authSaved -> "Authorize once, then the relay can start automatically."
+                RelayStarter.isRelayEnabled(this) && !notifications ->
+                    "Armed, but notification access is missing. Open Notification access or notifications cannot wake the relay."
                 !notifications -> "Notification access is still required."
                 androidCxrTooOld -> "Android CXR needs Android 13+. Choose an API speech engine on this phone."
                 androidCxrNeedsMic -> "Grant microphone permission for Android CXR voice replies."
@@ -1201,12 +1227,20 @@ class MainActivity : Activity() {
                 !batteryUnrestricted -> "Ready. Set battery to Unrestricted for best reliability."
                 RelayService.running && NotificationForwardingPolicy.isPaused(this) ->
                     "Ready. Forwarding is paused while this screen is on."
+                RelayService.running && snap.bootstrapReadyForMessages ->
+                    "Operational. Phone bridge and glasses app are ready."
                 RelayService.running -> "Awake. Relay will sleep again after the reply window."
                 SelfArmProvisioner.provisioned(this) -> "Armed. Self-arm provisioned for glasses recovery."
                 RelayStarter.isRelayEnabled(this) -> "Armed. Relay wakes on replyable notifications or inbox reply attempts."
                 else -> "Ready to arm wake-on-notification."
             }
-            noticeText.setTextColor(if (hiRokid && authSaved && notifications && sttReady) COLOR_PHOSPHOR else COLOR_MUTED)
+            noticeText.setTextColor(
+                when {
+                    RelayStarter.isRelayEnabled(this) && !notifications -> COLOR_AMBER
+                    hiRokid && authSaved && notifications && sttReady -> COLOR_PHOSPHOR
+                    else -> COLOR_MUTED
+                },
+            )
         }
 
         if (::sttSummary.isInitialized) {
@@ -1969,6 +2003,20 @@ class MainActivity : Activity() {
         CompanionDeviceCoordinator.startObserving(this)
         BleWakeServer.ensureStarted(this)
         return true
+    }
+
+    private fun relaunchRelayOrAuthorize(): Boolean {
+        if (savedAuthToken().isNullOrBlank()) {
+            armRelayAfterAuth = true
+            requestHiRokidAuthorization(auto = false, reason = RelayStarter.START_REASON_MANUAL)
+            return false
+        }
+        val started = RelayStarter.relaunch(this)
+        if (started) {
+            CompanionDeviceCoordinator.startObserving(this)
+            BleWakeServer.ensureStarted(this)
+        }
+        return started
     }
 
     private fun prepareSelfArmRecoveryOrAuthorize() {

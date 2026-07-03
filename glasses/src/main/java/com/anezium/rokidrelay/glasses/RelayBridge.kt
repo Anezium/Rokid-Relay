@@ -32,7 +32,9 @@ object RelayBridge {
     fun start(context: Context) {
         appContext = context.applicationContext
         if (bridge != null) {
-            RelayHudController.setConnection("connected")
+            if (!RelayHudController.isPhoneConnected()) {
+                RelayHudController.setConnection("connecting")
+            }
             requestState()
             return
         }
@@ -152,8 +154,10 @@ object RelayBridge {
     private val statusListener = object : CXRServiceBridge.StatusListener {
         override fun onConnected(name: String?, mac: String?, deviceType: Int) {
             main.post {
-                RelayHudController.setConnection("connected")
-                maybeStartPendingWakeReply()
+                if (!RelayHudController.isPhoneConnected()) {
+                    RelayHudController.setConnection("waiting")
+                }
+                requestState()
             }
         }
 
@@ -166,7 +170,14 @@ object RelayBridge {
         }
 
         override fun onARTCStatus(latency: Float, connected: Boolean) {
-            if (connected) main.post { RelayHudController.setConnection("connected") }
+            if (connected) {
+                main.post {
+                    if (!RelayHudController.isPhoneConnected()) {
+                        RelayHudController.setConnection("waiting")
+                    }
+                    requestState()
+                }
+            }
         }
 
         override fun onAudioNoise(noise: Float) = Unit

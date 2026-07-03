@@ -30,6 +30,7 @@ object RelayBridge {
         val lastVoiceError: String,
         val selfArmStatus: String,
         val selfArmKeyPresent: Boolean,
+        val bootstrapReadyForMessages: Boolean,
     )
 
     private const val TAG = "RokidRelayBridge"
@@ -58,6 +59,7 @@ object RelayBridge {
     @Volatile private var bootstrapStarted = false
     @Volatile private var bootstrapInFlight = false
     @Volatile private var bootstrapReadyForMessages = false
+    @Volatile private var bootstrapEpoch = 0L
     @Volatile private var bootstrapMayOpenClient = false
     @Volatile private var bootstrapOpenClientDeadlineMs = 0L
     @Volatile private var authToken = ""
@@ -92,6 +94,7 @@ object RelayBridge {
 
     fun stop() {
         main.post {
+            bootstrapEpoch += 1L
             VoiceController.cancel()
             cancelReconnect()
             runCatching { link?.disconnect() }
@@ -167,6 +170,7 @@ object RelayBridge {
         lastVoiceError = lastVoiceError,
         selfArmStatus = selfArmStatus,
         selfArmKeyPresent = selfArmKeyPresent,
+        bootstrapReadyForMessages = bootstrapReadyForMessages,
     )
 
     fun sendNotification(reply: ReplyRepository.PendingReply) {
@@ -327,6 +331,10 @@ object RelayBridge {
     }
 
     private fun startOnMain(context: Context, token: String, allowForegroundOpen: Boolean = false) {
+        bootstrapEpoch += 1L
+        bootstrapStarted = false
+        bootstrapInFlight = false
+        bootstrapReadyForMessages = false
         authToken = token
         val localLink = ensureLink(context)
         bootstrapState = "waiting for glasses"
@@ -345,45 +353,51 @@ object RelayBridge {
 
     private val linkCallback = object : ICXRLinkCbk {
         override fun onCXRLConnected(connected: Boolean) {
-            cxrConnected = connected
-            if (connected) {
-                lastStatus = "CXR-L connected"
-                if (glassConnected) sendState()
-            } else {
-                glassConnected = false
-                bootstrapStarted = false
-                bootstrapInFlight = false
-                bootstrapReadyForMessages = false
-                clearForegroundOpenRequest()
-                bootstrapState = "not connected"
-                lastStatus = "CXR-L disconnected"
-                scheduleReconnect("CXR-L disconnected")
+            main.post {
+                cxrConnected = connected
+                if (connected) {
+                    lastStatus = "CXR-L connected"
+                    if (glassConnected) sendState()
+                } else {
+                    bootstrapEpoch += 1L
+                    glassConnected = false
+                    bootstrapStarted = false
+                    bootstrapInFlight = false
+                    bootstrapReadyForMessages = false
+                    clearForegroundOpenRequest()
+                    bootstrapState = "not connected"
+                    lastStatus = "CXR-L disconnected"
+                    scheduleReconnect("CXR-L disconnected")
+                }
+                maybeBootstrap()
             }
-            maybeBootstrap()
         }
 
         override fun onGlassBtConnected(connected: Boolean) {
-            glassConnected = connected
-            lastStatus = if (connected) "glasses connected" else "glasses disconnected"
-            if (connected) {
-                cancelReconnect()
-                sendState()
-            } else {
-                bootstrapStarted = false
-                bootstrapInFlight = false
-                bootstrapReadyForMessages = false
-                clearForegroundOpenRequest()
-                bootstrapState = if (cxrConnected) "waiting for glasses" else "not connected"
+            main.post {
+                glassConnected = connected
+                lastStatus = if (connected) "glasses connected" else "glasses disconnected"
+                if (connected) {
+                    cancelReconnect()
+                    sendState()
+                } else {
+                    bootstrapEpoch += 1L
+                    bootstrapStarted = false
+                    bootstrapInFlight = false
+                    bootstrapReadyForMessages = false
+                    clearForegroundOpenRequest()
+                    bootstrapState = if (cxrConnected) "waiting for glasses" else "not connected"
+                }
+                maybeBootstrap()
             }
-            maybeBootstrap()
         }
 
         override fun onGlassAiAssistStart() {
-            lastStatus = "AI key down"
+            main.post { lastStatus = "AI key down" }
         }
 
         override fun onGlassAiAssistStop() {
-            lastStatus = "AI key up"
+            main.post { lastStatus = "AI key up" }
         }
     }
 
@@ -391,7 +405,7 @@ object RelayBridge {
         override fun onCustomCmdResult(key: String, payload: ByteArray) {
             if (key != Constants.KEY_COMMAND) return
             val json = payloadToJson(payload) ?: return
-            handleCommand(json)
+            main.post { handleCommand(json) }
         }
     }
 
@@ -490,30 +504,34 @@ object RelayBridge {
         bootstrapReadyForMessages = false
         bootstrapState = "preparing glasses app"
         val openAfterInstall = foregroundOpenActive
+        val epoch = bootstrapEpoch
         Thread {
             val result = ClientBootstrap(context, localLink).ensureReady(openAfterInstall = openAfterInstall)
-            val rerunForForegroundOpen = !openAfterInstall && foregroundOpenRequestActive() && result.success
-            bootstrapInFlight = false
-            if (openAfterInstall) clearForegroundOpenRequest()
-            bootstrapReadyForMessages = result.readyForMessages
-            if (rerunForForegroundOpen) {
-                bootstrapStarted = false
-                bootstrapReadyForMessages = false
-            }
-            bootstrapState = result.status
-            lastStatus = result.status
-            sendState()
-            if (result.success && result.readyForMessages) {
-                main.postDelayed(
-                    { provisionSelfArmIfArmed() },
-                    if (result.openedClient) 1_000L else 0L,
-                )
-            }
-            if (rerunForForegroundOpen) {
-                main.post { maybeBootstrap(allowForegroundOpen = true) }
-            } else if (result.success && result.readyForMessages) {
-                flushPendingNotification()
-                maybeStartPendingWakeVoice()
+            main.post {
+                if (epoch != bootstrapEpoch || link !== localLink) return@post
+                val rerunForForegroundOpen = !openAfterInstall && foregroundOpenRequestActive() && result.success
+                bootstrapInFlight = false
+                if (openAfterInstall) clearForegroundOpenRequest()
+                bootstrapReadyForMessages = result.readyForMessages
+                if (rerunForForegroundOpen) {
+                    bootstrapStarted = false
+                    bootstrapReadyForMessages = false
+                }
+                bootstrapState = result.status
+                lastStatus = result.status
+                sendState()
+                if (result.success && result.readyForMessages) {
+                    main.postDelayed(
+                        { if (epoch == bootstrapEpoch) provisionSelfArmIfArmed() },
+                        if (result.openedClient) 1_000L else 0L,
+                    )
+                }
+                if (rerunForForegroundOpen) {
+                    maybeBootstrap(allowForegroundOpen = true)
+                } else if (result.success && result.readyForMessages) {
+                    flushPendingNotification()
+                    maybeStartPendingWakeVoice()
+                }
             }
         }.apply {
             name = "RokidRelayBootstrap"

@@ -9,6 +9,7 @@ class RelayBridgeStartReasonTest {
     fun interactiveReasonsMayOpenGlassesHelperAfterInstall() {
         listOf(
             RelayStarter.START_REASON_MANUAL,
+            RelayStarter.START_REASON_RELAUNCH,
             "authorization",
             "permissions",
             "stt_engine",

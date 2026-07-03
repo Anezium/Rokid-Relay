@@ -112,9 +112,8 @@ object SelfArmProvisioner {
 
     fun localKeyAvailable(context: Context): Boolean =
         runCatching {
-            ensureKeyMaterial(context.applicationContext)
-            privateKeyFile(context.applicationContext).exists() &&
-                publicKeyFile(context.applicationContext).exists()
+            privateKeyFile(context.applicationContext).readText().isNotBlank() &&
+                publicKeyFile(context.applicationContext).readText().isNotBlank()
         }.getOrDefault(false)
 
     internal fun ensureKeyMaterial(context: Context): AdbKeyGenerator.GeneratedKey {

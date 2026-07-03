@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.1.15-preview.17 - 2026-07-03
+
+- Serialized all phone-side CXR-L link callbacks and bridge state changes onto the main thread, removing races between connect/disconnect events and the glasses bootstrap.
+- Added a bootstrap epoch guard so a bootstrap thread that finishes after `stop()`, a reconnect, or a restart can no longer overwrite the current bridge state or trigger stale self-arm provisioning.
+- Reworked the phone `Relay service` setup row to report the real bridge state (`Operational`, `Connected, preparing glasses app`, `Running, …`, `Armed`, `Stopped`) from a live bridge snapshot instead of only the armed preference.
+- Added a `Relay recovery` row with a `Relaunch` action that cleanly restarts the Relay service and bridge without disarming, for when the relay looks wedged.
+- Made an armed relay with missing notification access impossible to miss: the setup row now reads `Armed, notification access missing` and the notice text turns amber.
+- Stopped the glasses HUD from claiming `connected` on raw SDK link callbacks or repeated bridge starts; it now shows `connecting`/`waiting` until the phone actually answers with its `state` payload.
+- Made `localKeyAvailable()` a read-only check so rendering the phone status screen no longer generates ADB recovery key material as a side effect; added a regression test.
+- Bumped the phone app to `0.1.15-preview.17` / `versionCode 32` and the bundled glasses helper to `0.1.10-preview.9` / `versionCode 19`.
+
 ## v0.1.15-preview.16 - 2026-07-03
 
 - Fixed the phone Self-arm recovery row so `Waiting for glasses link` is no longer passive: tapping it now actively retries the self-arm CXR/glasses provisioning path.
