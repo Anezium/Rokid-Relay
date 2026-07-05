@@ -253,9 +253,12 @@ class SpeechRecognizerLanguageProbeActivity : Activity() {
             return
         }
 
-        val targets = recognitionTargets(recognitionServices(), includeDefault = false)
+        // Include the system-default recognizer: it is what pre-v0.1.15-preview.9 builds used
+        // (plain createSpeechRecognizer), and on some phones it is the only target whose online
+        // stack supports Cantonese — exactly the working configuration we are trying to find.
+        val targets = recognitionTargets(recognitionServices(), includeDefault = true)
         if (targets.isEmpty()) {
-            appendLine("MIC_LISTEN_ABORT no Google or on-device recognizer target is available.")
+            appendLine("MIC_LISTEN_ABORT no recognizer target is available.")
             finishRun()
             return
         }
