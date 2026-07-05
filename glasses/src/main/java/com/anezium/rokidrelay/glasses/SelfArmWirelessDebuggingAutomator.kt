@@ -18,7 +18,6 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import java.net.Inet4Address
 import java.net.NetworkInterface
-import java.text.Normalizer
 import java.util.Locale
 import java.util.regex.Pattern
 
@@ -275,6 +274,9 @@ internal class SelfArmWirelessDebuggingAutomator(
                 "depuracao sem fio",
                 "debug wireless",
                 "wireless debuggen",
+                "отладка по wi-fi",
+                "отладка по wi fi",
+                "отладка по wifi",
             )
         ) {
             report("opening_wireless_debugging")
@@ -341,7 +343,7 @@ internal class SelfArmWirelessDebuggingAutomator(
             schedule(900L)
             return
         }
-        val buildNumber = findFirst(root) {
+        val buildNumber = findBuildNumberByBuildIdentifier(root) ?: findFirst(root) {
             containsText(
                 it,
                 "build number",
@@ -351,6 +353,7 @@ internal class SelfArmWirelessDebuggingAutomator(
                 "numero de compilacion",
                 "numero de compilacao",
                 "build-nummer",
+                "номер сборки",
             )
         }
         if (buildNumber != null && buildNumberTaps < MAX_BUILD_NUMBER_TAPS) {
@@ -393,6 +396,9 @@ internal class SelfArmWirelessDebuggingAutomator(
                 "utiliser le bogage sans fil",
                 "usar depuracion inalambrica",
                 "usar depuracao sem fio",
+                "использовать отладку по wi-fi",
+                "использовать отладку по wi fi",
+                "использовать отладку по wifi",
             )
         }
         val toggleTarget = switchBar ?: switchNode ?: switchText
@@ -428,6 +434,10 @@ internal class SelfArmWirelessDebuggingAutomator(
                 "codigo de pareamento",
                 "codice di accoppiamento",
                 "kopplungscode",
+                "подключение устройства с помощью кода подключения",
+                "подключить устройство с помощью кода подключения",
+                "кода подключения",
+                "код подключения",
             )
         ) {
             pairingRequested = true
@@ -523,6 +533,15 @@ internal class SelfArmWirelessDebuggingAutomator(
             "code d'association wifi",
             "adresse ip et port",
             "adresse ip & port",
+            "подключение устройства",
+            "подключить устройство",
+            "код подключения wi-fi",
+            "код подключения wifi",
+            "кода подключения",
+            "код подключения",
+            "ip-адрес и порт",
+            "ip адрес и порт",
+            "ip-адрес & порт",
         )
 
     private fun reportPairingReadyAndHold(
@@ -614,7 +633,8 @@ internal class SelfArmWirelessDebuggingAutomator(
                 "activer", "autoriser", "utiliser", "oui", "yes",
                 "activar", "habilitar", "permitir", "si", "sim",
                 "attiva", "abilita", "consenti",
-                "ja", "aktivieren", "einschalten", "erlauben", "zulassen" -> true
+                "ja", "aktivieren", "einschalten", "erlauben", "zulassen",
+                "включить", "разрешить", "да" -> true
                 else -> false
             }
         }
@@ -631,6 +651,9 @@ internal class SelfArmWirelessDebuggingAutomator(
             "depuracao sem fio",
             "debug wireless",
             "drahtloses debugging",
+            "отладка по wi-fi",
+            "отладка по wi fi",
+            "отладка по wifi",
         )
 
     private fun isWirelessDebuggingPage(root: AccessibilityNodeInfo): Boolean =
@@ -642,6 +665,9 @@ internal class SelfArmWirelessDebuggingAutomator(
             "depuracion inalambrica",
             "depuracao sem fio",
             "debug wireless",
+            "отладка по wi-fi",
+            "отладка по wi fi",
+            "отладка по wifi",
         ) &&
             containsInTree(
                 root,
@@ -653,6 +679,11 @@ internal class SelfArmWirelessDebuggingAutomator(
                 "code d'association",
                 "usar depuracion inalambrica",
                 "usar depuracao sem fio",
+                "подключение устройства",
+                "код подключения",
+                "использовать отладку по wi-fi",
+                "использовать отладку по wi fi",
+                "использовать отладку по wifi",
             )
 
     private fun isDeveloperOptionsScreen(root: AccessibilityNodeInfo): Boolean =
@@ -663,6 +694,9 @@ internal class SelfArmWirelessDebuggingAutomator(
             "opciones de desarrollador",
             "opcoes do desenvolvedor",
             "entwickleroptionen",
+            "параметры разработчика",
+            "настройки разработчика",
+            "для разработчиков",
         ) ||
             (
                 containsInTree(
@@ -672,6 +706,7 @@ internal class SelfArmWirelessDebuggingAutomator(
                     "debuggen",
                     "depuracion",
                     "depuracao",
+                    "отладка",
                 ) &&
                     containsInTree(
                         root,
@@ -681,6 +716,9 @@ internal class SelfArmWirelessDebuggingAutomator(
                         "memoria",
                         "rapport de bug",
                         "bug report",
+                        "память",
+                        "отчет об ошибке",
+                        "отчёт об ошибке",
                     )
                 )
 
@@ -696,6 +734,9 @@ internal class SelfArmWirelessDebuggingAutomator(
             "ative primeiro as opcoes do desenvolvedor",
             "attiva prima le opzioni sviluppatore",
             "entwickleroptionen zuerst aktivieren",
+            "сначала включите параметры разработчика",
+            "сначала включите настройки разработчика",
+            "включите параметры разработчика",
         )
 
     private fun clickWifiToggle(root: AccessibilityNodeInfo): Boolean {
@@ -870,8 +911,29 @@ internal class SelfArmWirelessDebuggingAutomator(
     private fun containsText(node: AccessibilityNodeInfo, vararg needles: String): Boolean {
         val value = normalizedText(node)
         if (value.isBlank()) return false
-        return needles.any { value.contains(normalize(it)) }
+        return needles.any {
+            val needle = normalize(it)
+            needle.isNotBlank() && value.contains(needle)
+        }
     }
+
+    private fun findBuildNumberByBuildIdentifier(root: AccessibilityNodeInfo): AccessibilityNodeInfo? =
+        findFirst(root) {
+            it !== root &&
+                it.isClickable &&
+                SelfArmSettingsTextMatcher.containsBuildIdentifier(
+                    subtreeText(it),
+                    Build.DISPLAY.orEmpty(),
+                    Build.ID.orEmpty(),
+                )
+        } ?: findFirst(root) {
+            it !== root &&
+                SelfArmSettingsTextMatcher.containsBuildIdentifier(
+                    rawText(it),
+                    Build.DISPLAY.orEmpty(),
+                    Build.ID.orEmpty(),
+                )
+        }
 
     private fun textByViewId(root: AccessibilityNodeInfo, viewId: String): String =
         firstByViewId(root, viewId)?.let { rawText(it) }.orEmpty()
@@ -917,6 +979,12 @@ internal class SelfArmWirelessDebuggingAutomator(
         }
     }
 
+    private fun subtreeText(node: AccessibilityNodeInfo?): String {
+        val allTexts = mutableListOf<String>()
+        collectAllTexts(node, allTexts)
+        return allTexts.joinToString(" ")
+    }
+
     private fun rawText(node: AccessibilityNodeInfo?): String {
         if (node == null) return ""
         val text = node.text?.takeIf { it.isNotEmpty() } ?: node.contentDescription
@@ -926,13 +994,8 @@ internal class SelfArmWirelessDebuggingAutomator(
     private fun normalizedText(node: AccessibilityNodeInfo): String =
         normalize(rawText(node))
 
-    private fun normalize(value: String): String {
-        if (value.isBlank()) return ""
-        return Normalizer.normalize(value, Normalizer.Form.NFD)
-            .replace(Regex("\\p{Mn}+"), "")
-            .lowercase(Locale.US)
-            .trim()
-    }
+    private fun normalize(value: String): String =
+        SelfArmSettingsTextMatcher.normalize(value)
 
     private fun className(node: AccessibilityNodeInfo?): String =
         node?.className?.toString().orEmpty()
