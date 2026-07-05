@@ -30,7 +30,13 @@ class TranscriptionLanguageConfigTest {
         assertTrue(language.openAiPrompt?.isNotBlank() == true)
         assertEquals("yue", language.elevenLabsCode)
         assertEquals("zh-HK", language.azureLocale)
-        assertEquals("zh-HK", language.androidTag)
+        assertEquals(listOf("yue-Hant-HK", "yue-HK", "zh-HK"), language.androidTagChain())
+    }
+
+    @Test
+    fun androidTagChainIsPrimaryTagOnlyForSingleTagLanguagesAndEmptyForAuto() {
+        assertEquals(listOf("en-US"), TranscriptionLanguage.ENGLISH.androidTagChain())
+        assertEquals(emptyList<String>(), TranscriptionLanguage.AUTO.androidTagChain())
     }
 
     @Test

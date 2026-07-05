@@ -74,15 +74,32 @@ class SpeechToTextConfigTest {
 
     @Test
     fun androidCxrAutoDoesNotSendExplicitLanguageHint() {
-        assertNull(androidCxrLanguageTag(TranscriptionLanguage.AUTO, retryWithoutLanguageHint = false))
+        assertNull(androidCxrLanguageTag(TranscriptionLanguage.AUTO, languageTagAttempt = 0))
     }
 
     @Test
-    fun androidCxrExplicitLanguageUsesAndroidTagUntilRetry() {
+    fun androidCxrExplicitLanguageWalksTagChainThenDropsHint() {
         assertEquals(
             "fr-FR",
-            androidCxrLanguageTag(TranscriptionLanguage.FRENCH, retryWithoutLanguageHint = false),
+            androidCxrLanguageTag(TranscriptionLanguage.FRENCH, languageTagAttempt = 0),
         )
-        assertNull(androidCxrLanguageTag(TranscriptionLanguage.FRENCH, retryWithoutLanguageHint = true))
+        assertNull(androidCxrLanguageTag(TranscriptionLanguage.FRENCH, languageTagAttempt = 1))
+    }
+
+    @Test
+    fun androidCxrCantoneseTriesGoogleCantoneseTagsBeforeHongKongChinese() {
+        assertEquals(
+            "yue-Hant-HK",
+            androidCxrLanguageTag(TranscriptionLanguage.CANTONESE, languageTagAttempt = 0),
+        )
+        assertEquals(
+            "yue-HK",
+            androidCxrLanguageTag(TranscriptionLanguage.CANTONESE, languageTagAttempt = 1),
+        )
+        assertEquals(
+            "zh-HK",
+            androidCxrLanguageTag(TranscriptionLanguage.CANTONESE, languageTagAttempt = 2),
+        )
+        assertNull(androidCxrLanguageTag(TranscriptionLanguage.CANTONESE, languageTagAttempt = 3))
     }
 }

@@ -138,11 +138,11 @@ object VoiceController {
         link: CXRLink,
         notificationId: String,
         language: TranscriptionLanguage,
-        retryWithoutLanguageHint: Boolean = false,
+        languageTagAttempt: Int = 0,
         recognizerRetryAttempt: Int = 0,
     ) {
         var recognizerRef: AndroidCxrSpeechRecognizer? = null
-        val androidLanguageTag = androidCxrLanguageTag(language, retryWithoutLanguageHint)
+        val androidLanguageTag = androidCxrLanguageTag(language, languageTagAttempt)
         val recognizer = AndroidCxrSpeechRecognizer(
             context = context,
             link = link,
@@ -184,20 +184,25 @@ object VoiceController {
                         !voiceActive ||
                         activeRecognizer !== recognizerRef ||
                         activeNotificationId != notificationId ||
-                        retryWithoutLanguageHint ||
                         languageTag.isNullOrBlank()
                     ) {
                         return false
                     }
-                    Log.i(TAG, "Android CXR rejected language '$languageTag'; retrying without language hint")
+                    val nextAttempt = languageTagAttempt + 1
+                    val nextTag = androidCxrLanguageTag(language, nextAttempt)
+                    Log.i(
+                        TAG,
+                        "Android CXR rejected language '$languageTag'; retrying " +
+                            (nextTag?.let { "with '$it'" } ?: "without language hint"),
+                    )
                     activeRecognizer = null
                     RelayBridge.sendVoiceState("listening")
                     startAndroidCxrRecognizer(
                         context = context,
                         link = link,
                         notificationId = notificationId,
-                        language = TranscriptionLanguage.AUTO,
-                        retryWithoutLanguageHint = true,
+                        language = language,
+                        languageTagAttempt = nextAttempt,
                         recognizerRetryAttempt = recognizerRetryAttempt,
                     )
                     return true
@@ -226,7 +231,7 @@ object VoiceController {
                                 link = link,
                                 notificationId = notificationId,
                                 language = language,
-                                retryWithoutLanguageHint = retryWithoutLanguageHint,
+                                languageTagAttempt = languageTagAttempt,
                                 recognizerRetryAttempt = recognizerRetryAttempt + 1,
                             )
                         }
@@ -606,8 +611,8 @@ object VoiceController {
 
 internal fun androidCxrLanguageTag(
     language: TranscriptionLanguage,
-    retryWithoutLanguageHint: Boolean,
+    languageTagAttempt: Int,
 ): String? {
-    if (retryWithoutLanguageHint || language == TranscriptionLanguage.AUTO) return null
-    return language.androidTag?.takeIf { it.isNotBlank() }
+    if (language == TranscriptionLanguage.AUTO) return null
+    return language.androidTagChain().getOrNull(languageTagAttempt)
 }

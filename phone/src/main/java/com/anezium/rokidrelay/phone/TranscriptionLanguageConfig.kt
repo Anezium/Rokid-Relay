@@ -23,6 +23,7 @@ enum class TranscriptionLanguage(
     val elevenLabsCode: String? = null,
     val azureLocale: String? = null,
     val androidTag: String? = null,
+    val androidFallbackTags: List<String> = emptyList(),
     val uiNote: String? = null,
 ) {
     AUTO(
@@ -111,8 +112,9 @@ enum class TranscriptionLanguage(
         openAiPrompt = "廣東話語音。請用繁體中文轉寫。",
         elevenLabsCode = "yue",
         azureLocale = "zh-HK",
-        androidTag = "zh-HK",
-        uiNote = "ElevenLabs (yue) and Azure (zh-HK) write Traditional Chinese. Android CXR uses the Hong Kong Chinese locale and retries Auto if the phone rejects it.",
+        androidTag = "yue-Hant-HK",
+        androidFallbackTags = listOf("yue-HK", "zh-HK"),
+        uiNote = "ElevenLabs (yue) and Azure (zh-HK) write Traditional Chinese. Android CXR tries Google's Cantonese locale (yue-Hant-HK) first, then Hong Kong Chinese, then Auto.",
     ),
     CHINESE_TRADITIONAL(
         id = "zh-hant",
@@ -136,6 +138,17 @@ enum class TranscriptionLanguage(
         androidTag = "zh-CN",
     ),
     ;
+
+    /**
+     * Ordered Android SpeechRecognizer tags to attempt, best first. The recognizer cannot be
+     * pre-queried reliably (checkRecognitionSupport reports SUPPORT even for invalid tags), so
+     * callers try each tag for real and walk to the next on ERROR_LANGUAGE_NOT_SUPPORTED,
+     * finishing with a no-hint attempt.
+     */
+    fun androidTagChain(): List<String> {
+        val primary = androidTag?.takeIf { it.isNotBlank() } ?: return emptyList()
+        return listOf(primary) + androidFallbackTags.filter { it.isNotBlank() }
+    }
 
     companion object {
         fun fromId(id: String?): TranscriptionLanguage {
