@@ -139,14 +139,17 @@ object VoiceController {
         notificationId: String,
         language: TranscriptionLanguage,
         languageTagAttempt: Int = 0,
+        recognizerAttempt: Int = 0,
         recognizerRetryAttempt: Int = 0,
     ) {
         var recognizerRef: AndroidCxrSpeechRecognizer? = null
+        val recognizerTargetCount = AndroidCxrSpeechRecognizer.recognizerTargetCount(context)
         val androidLanguageTag = androidCxrLanguageTag(language, languageTagAttempt)
         val recognizer = AndroidCxrSpeechRecognizer(
             context = context,
             link = link,
             languageTag = androidLanguageTag,
+            recognizerAttempt = recognizerAttempt,
             listener = object : AndroidCxrSpeechRecognizer.Listener {
                 override fun onListening() {
                     if (voiceActive && activeRecognizer === recognizerRef && activeNotificationId == notificationId) {
@@ -175,7 +178,13 @@ object VoiceController {
 
                 override fun onError(message: String) {
                     if (voiceActive && activeRecognizer === recognizerRef && activeNotificationId == notificationId) {
-                        failVoiceRecognition(androidCxrLanguageFailureMessage(language, message))
+                        failVoiceRecognition(
+                            androidCxrLanguageFailureMessage(
+                                language = language,
+                                message = message,
+                                recognizerTargetCount = recognizerTargetCount,
+                            ),
+                        )
                     }
                 }
 
@@ -183,16 +192,22 @@ object VoiceController {
                     if (
                         !voiceActive ||
                         activeRecognizer !== recognizerRef ||
-                        activeNotificationId != notificationId ||
-                        languageTag.isNullOrBlank()
+                        activeNotificationId != notificationId
                     ) {
                         return false
                     }
-                    val nextAttempt = languageTagAttempt + 1
-                    val nextTag = androidCxrLanguageTag(language, nextAttempt)
+                    val nextAttempt = nextAndroidCxrRecognizerWalkAttempt(
+                        language = language,
+                        languageTagAttempt = languageTagAttempt,
+                        recognizerAttempt = recognizerAttempt,
+                        recognizerTargetCount = recognizerTargetCount,
+                    ) ?: return false
+                    val nextTag = androidCxrLanguageTag(language, nextAttempt.languageTagAttempt)
                     Log.i(
                         TAG,
-                        "Android CXR rejected language '$languageTag'; retrying " +
+                        "Android CXR recognizer $recognizerAttempt rejected language " +
+                            "'${languageTag ?: "auto"}'; retrying recognizer " +
+                            "${nextAttempt.recognizerAttempt} " +
                             (nextTag?.let { "with '$it'" } ?: "without language hint"),
                     )
                     activeRecognizer = null
@@ -202,7 +217,8 @@ object VoiceController {
                         link = link,
                         notificationId = notificationId,
                         language = language,
-                        languageTagAttempt = nextAttempt,
+                        languageTagAttempt = nextAttempt.languageTagAttempt,
+                        recognizerAttempt = nextAttempt.recognizerAttempt,
                         recognizerRetryAttempt = recognizerRetryAttempt,
                     )
                     return true
@@ -220,6 +236,10 @@ object VoiceController {
                     Log.i(TAG, "Android CXR recognizer interrupted; retrying once: $message")
                     activeRecognizer = null
                     RelayBridge.sendVoiceState("listening")
+                    val retryAttempt = sameAndroidCxrRecognizerWalkAttempt(
+                        languageTagAttempt = languageTagAttempt,
+                        recognizerAttempt = recognizerAttempt,
+                    )
                     main.postDelayed({
                         if (
                             voiceActive &&
@@ -231,7 +251,8 @@ object VoiceController {
                                 link = link,
                                 notificationId = notificationId,
                                 language = language,
-                                languageTagAttempt = languageTagAttempt,
+                                languageTagAttempt = retryAttempt.languageTagAttempt,
+                                recognizerAttempt = retryAttempt.recognizerAttempt,
                                 recognizerRetryAttempt = recognizerRetryAttempt + 1,
                             )
                         }
@@ -570,15 +591,20 @@ object VoiceController {
         failVoiceRecognition(message)
     }
 
-    private fun androidCxrLanguageFailureMessage(language: TranscriptionLanguage, message: String): String {
+    internal fun androidCxrLanguageFailureMessage(
+        language: TranscriptionLanguage,
+        message: String,
+        recognizerTargetCount: Int,
+    ): String {
         if (
             message != "Speech language not supported" &&
             message != "Speech language unavailable"
         ) {
             return message
         }
-        val tried = language.androidTagChain() + "auto"
-        return "$message (tried ${tried.joinToString(", ")})"
+        val tried = language.androidTagChain().ifEmpty { listOf("auto") }
+        val recognizerSuffix = if (recognizerTargetCount > 1) "; multiple recognizers" else ""
+        return "$message (tried ${tried.joinToString(", ")}$recognizerSuffix)"
     }
 
     private fun cancelOnMain(sendIdle: Boolean) {
@@ -627,3 +653,44 @@ internal fun androidCxrLanguageTag(
     if (language == TranscriptionLanguage.AUTO) return null
     return language.androidTagChain().getOrNull(languageTagAttempt)
 }
+
+internal data class AndroidCxrRecognizerWalkAttempt(
+    val languageTagAttempt: Int,
+    val recognizerAttempt: Int,
+)
+
+internal fun nextAndroidCxrRecognizerWalkAttempt(
+    language: TranscriptionLanguage,
+    languageTagAttempt: Int,
+    recognizerAttempt: Int,
+    recognizerTargetCount: Int,
+): AndroidCxrRecognizerWalkAttempt? {
+    if (recognizerTargetCount <= 0) return null
+    val languageAttemptCount = androidCxrLanguageAttemptCount(language)
+    val nextLanguageTagAttempt = languageTagAttempt + 1
+    if (nextLanguageTagAttempt < languageAttemptCount) {
+        return AndroidCxrRecognizerWalkAttempt(
+            languageTagAttempt = nextLanguageTagAttempt,
+            recognizerAttempt = recognizerAttempt,
+        )
+    }
+
+    val nextRecognizerAttempt = recognizerAttempt + 1
+    if (nextRecognizerAttempt >= recognizerTargetCount) return null
+    return AndroidCxrRecognizerWalkAttempt(
+        languageTagAttempt = 0,
+        recognizerAttempt = nextRecognizerAttempt,
+    )
+}
+
+internal fun sameAndroidCxrRecognizerWalkAttempt(
+    languageTagAttempt: Int,
+    recognizerAttempt: Int,
+): AndroidCxrRecognizerWalkAttempt =
+    AndroidCxrRecognizerWalkAttempt(
+        languageTagAttempt = languageTagAttempt,
+        recognizerAttempt = recognizerAttempt,
+    )
+
+private fun androidCxrLanguageAttemptCount(language: TranscriptionLanguage): Int =
+    if (language == TranscriptionLanguage.AUTO) 1 else language.androidTagChain().size

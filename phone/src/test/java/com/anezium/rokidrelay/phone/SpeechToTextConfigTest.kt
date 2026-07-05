@@ -102,4 +102,78 @@ class SpeechToTextConfigTest {
         )
         assertNull(androidCxrLanguageTag(TranscriptionLanguage.CANTONESE, languageTagAttempt = 3))
     }
+
+    @Test
+    fun androidCxrWalkAdvancesTagsBeforeRecognizerTarget() {
+        assertEquals(
+            AndroidCxrRecognizerWalkAttempt(languageTagAttempt = 1, recognizerAttempt = 0),
+            nextAndroidCxrRecognizerWalkAttempt(
+                language = TranscriptionLanguage.CANTONESE,
+                languageTagAttempt = 0,
+                recognizerAttempt = 0,
+                recognizerTargetCount = 2,
+            ),
+        )
+    }
+
+    @Test
+    fun androidCxrWalkAdvancesRecognizerAndResetsTagAfterTagChainExhausts() {
+        assertEquals(
+            AndroidCxrRecognizerWalkAttempt(languageTagAttempt = 0, recognizerAttempt = 1),
+            nextAndroidCxrRecognizerWalkAttempt(
+                language = TranscriptionLanguage.CANTONESE,
+                languageTagAttempt = 2,
+                recognizerAttempt = 0,
+                recognizerTargetCount = 2,
+            ),
+        )
+    }
+
+    @Test
+    fun androidCxrWalkReturnsNullWhenRecognizerTargetsExhaust() {
+        assertNull(
+            nextAndroidCxrRecognizerWalkAttempt(
+                language = TranscriptionLanguage.CANTONESE,
+                languageTagAttempt = 2,
+                recognizerAttempt = 1,
+                recognizerTargetCount = 2,
+            ),
+        )
+    }
+
+    @Test
+    fun androidCxrAutoWalksRecognizerTargetsWithoutLanguageHint() {
+        assertEquals(
+            AndroidCxrRecognizerWalkAttempt(languageTagAttempt = 0, recognizerAttempt = 1),
+            nextAndroidCxrRecognizerWalkAttempt(
+                language = TranscriptionLanguage.AUTO,
+                languageTagAttempt = 0,
+                recognizerAttempt = 0,
+                recognizerTargetCount = 2,
+            ),
+        )
+    }
+
+    @Test
+    fun androidCxrTransientRetryPreservesWalkIndices() {
+        assertEquals(
+            AndroidCxrRecognizerWalkAttempt(languageTagAttempt = 2, recognizerAttempt = 1),
+            sameAndroidCxrRecognizerWalkAttempt(
+                languageTagAttempt = 2,
+                recognizerAttempt = 1,
+            ),
+        )
+    }
+
+    @Test
+    fun androidCxrLanguageFailureMentionsTriedTagsAndMultipleRecognizers() {
+        assertEquals(
+            "Speech language not supported (tried yue-Hant-HK, yue-HK, zh-HK; multiple recognizers)",
+            VoiceController.androidCxrLanguageFailureMessage(
+                language = TranscriptionLanguage.CANTONESE,
+                message = "Speech language not supported",
+                recognizerTargetCount = 3,
+            ),
+        )
+    }
 }

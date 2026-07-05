@@ -11,6 +11,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
+import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognitionService
 import android.speech.RecognizerIntent
@@ -26,6 +27,7 @@ class AndroidCxrSpeechRecognizer(
     private val context: Context,
     private val link: CXRLink,
     private val languageTag: String?,
+    private val recognizerAttempt: Int = 0,
     private val listener: Listener,
 ) {
     interface Listener {
@@ -85,7 +87,22 @@ class AndroidCxrSpeechRecognizer(
             failBeforeStart("Glasses audio stream unavailable")
             return false
         }
-        val localRecognizer = createInjectedAudioRecognizer()
+        val targets = recognitionTargets(appContext)
+        val target = targets.getOrNull(recognizerAttempt) ?: run {
+            releaseMicrophoneForeground()
+            cleanupCxrAudioSource()
+            failBeforeStart("Android speech recognition unavailable")
+            return false
+        }
+        val localRecognizer = runCatching {
+            target.create(appContext)
+        }.getOrElse { error ->
+            Log.w(TAG, "Speech recognizer target unavailable: ${target.reportName}", error)
+            releaseMicrophoneForeground()
+            cleanupCxrAudioSource()
+            failBeforeStart("Speech recognizer failed to start")
+            return false
+        }
         recognizer = localRecognizer
         localRecognizer.setRecognitionListener(recognitionListener(localRecognizer))
         val intent = android.content.Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -107,6 +124,11 @@ class AndroidCxrSpeechRecognizer(
             putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_ENCODING, AudioFormat.ENCODING_PCM_16BIT)
         }
         return runCatching {
+            Log.i(
+                TAG,
+                "Android CXR recognizer attempt target=${target.reportName} " +
+                    "tag=${languageTag?.takeIf { it.isNotBlank() } ?: "auto"}",
+            )
             localRecognizer.startListening(intent)
             listener.onListening()
             true
@@ -127,37 +149,8 @@ class AndroidCxrSpeechRecognizer(
     // EXTRA_AUDIO_SOURCE (injected-audio) is only honored by recognizers that actually
     // support it. The system-default recognizer on some OEMs (e.g. Samsung) ignores the
     // injected pipe and silently reads the phone mic instead, which yields ERROR_NO_MATCH
-    // even though glasses audio is flowing. Prefer the Google recognition service, then the
+    // even though glasses audio is flowing. Walk Google-capable recognizers first, then the
     // on-device recognizer, then fall back to the system default.
-    private fun createInjectedAudioRecognizer(): SpeechRecognizer {
-        googleRecognitionComponent()?.let { component ->
-            runCatching {
-                val recognizer = SpeechRecognizer.createSpeechRecognizer(appContext, component)
-                Log.i(TAG, "Using Google recognition service ${component.flattenToShortString()}")
-                return recognizer
-            }.onFailure { Log.w(TAG, "Google recognition service unavailable", it) }
-        }
-        if (SpeechRecognizer.isOnDeviceRecognitionAvailable(appContext)) {
-            runCatching {
-                val recognizer = SpeechRecognizer.createOnDeviceSpeechRecognizer(appContext)
-                Log.i(TAG, "Using on-device recognizer")
-                return recognizer
-            }.onFailure { Log.w(TAG, "On-device recognizer unavailable", it) }
-        }
-        Log.w(TAG, "Falling back to system-default recognizer (may ignore injected audio)")
-        return SpeechRecognizer.createSpeechRecognizer(appContext)
-    }
-
-    private fun googleRecognitionComponent(): ComponentName? {
-        val intent = android.content.Intent(RecognitionService.SERVICE_INTERFACE)
-        val services = runCatching {
-            appContext.packageManager.queryIntentServices(intent, 0)
-        }.getOrDefault(emptyList())
-        val match = services.firstOrNull {
-            it.serviceInfo?.packageName?.startsWith("com.google.android") == true
-        } ?: return null
-        return ComponentName(match.serviceInfo.packageName, match.serviceInfo.name)
-    }
 
     private fun startCxrAudioSource(): ParcelFileDescriptor? {
         return runCatching {
@@ -574,17 +567,120 @@ class AndroidCxrSpeechRecognizer(
             this == SpeechRecognizer.ERROR_NETWORK ||
             this == SpeechRecognizer.ERROR_NETWORK_TIMEOUT
 
-    private companion object {
-        const val TAG = "RelayAndroidCxrStt"
-        const val CXR_AUDIO_PCM = 1
-        const val SAMPLE_RATE_HZ = 16_000
-        const val CXR_AUDIO_FIRST_BYTE_TIMEOUT_MS = 6_000L
-        const val SPEECH_INPUT_MINIMUM_LENGTH_MS = 2_500L
-        const val SPEECH_POSSIBLY_COMPLETE_SILENCE_MS = 2_500L
-        const val SPEECH_COMPLETE_SILENCE_MS = 3_000L
-        const val DIAGNOSTICS_UPDATE_MS = 500L
-        const val VAD_CHECK_INTERVAL_MS = 120L
-        const val FINAL_RESULT_TIMEOUT_MS = 2_500L
-        val WORD_SPLIT_REGEX = Regex("\\s+")
+    companion object {
+        internal fun recognizerTargetCount(context: Context): Int =
+            recognitionTargets(context.applicationContext).size
+
+        private fun recognitionTargets(context: Context): List<RecognizerTarget> {
+            val defaultComponent = defaultRecognitionServiceComponent(context)
+            val targets = mutableListOf<RecognizerTarget>()
+            val targetIds = mutableSetOf<String>()
+
+            fun addTarget(target: RecognizerTarget) {
+                if (targetIds.add(target.id)) targets += target
+            }
+
+            if (defaultComponent?.isGoogleRecognitionService() == true) {
+                addTarget(
+                    RecognizerTarget(
+                        id = DEFAULT_TARGET_ID,
+                        reportName = "default:${defaultComponent.flattenToShortString()}",
+                        defaultRecognizer = true,
+                    ),
+                )
+            }
+
+            googleRecognitionComponents(context)
+                .filter { component -> component != defaultComponent }
+                .forEach { component ->
+                    addTarget(
+                        RecognizerTarget(
+                            id = "component:${component.flattenToShortString()}",
+                            reportName = "google:${component.flattenToShortString()}",
+                            component = component,
+                        ),
+                    )
+                }
+
+            if (SpeechRecognizer.isOnDeviceRecognitionAvailable(context)) {
+                addTarget(
+                    RecognizerTarget(
+                        id = ON_DEVICE_TARGET_ID,
+                        reportName = "on-device:$ON_DEVICE_COMPONENT_LABEL",
+                        onDevice = true,
+                    ),
+                )
+            }
+
+            addTarget(
+                RecognizerTarget(
+                    id = DEFAULT_TARGET_ID,
+                    reportName = "default:${defaultComponent?.flattenToShortString() ?: DEFAULT_COMPONENT_LABEL}",
+                    defaultRecognizer = true,
+                    warnInjectedAudio = true,
+                ),
+            )
+            return targets
+        }
+
+        private fun googleRecognitionComponents(context: Context): List<ComponentName> {
+            val intent = android.content.Intent(RecognitionService.SERVICE_INTERFACE)
+            val services = runCatching {
+                context.packageManager.queryIntentServices(intent, 0)
+            }.getOrDefault(emptyList())
+            return services.mapNotNull { info ->
+                val service = info.serviceInfo ?: return@mapNotNull null
+                if (!service.packageName.startsWith(GOOGLE_PACKAGE_PREFIX)) return@mapNotNull null
+                ComponentName(service.packageName, service.name)
+            }
+        }
+
+        private fun defaultRecognitionServiceComponent(context: Context): ComponentName? =
+            runCatching {
+                Settings.Secure.getString(context.contentResolver, VOICE_RECOGNITION_SERVICE_SETTING)
+                    ?.let(ComponentName::unflattenFromString)
+            }.getOrNull()
+
+        private fun ComponentName.isGoogleRecognitionService(): Boolean =
+            packageName.startsWith(GOOGLE_PACKAGE_PREFIX)
+
+        private data class RecognizerTarget(
+            val id: String,
+            val reportName: String,
+            val component: ComponentName? = null,
+            val onDevice: Boolean = false,
+            val defaultRecognizer: Boolean = false,
+            val warnInjectedAudio: Boolean = false,
+        ) {
+            fun create(context: Context): SpeechRecognizer {
+                if (warnInjectedAudio) {
+                    Log.w(TAG, "Falling back to system-default recognizer (may ignore injected audio)")
+                }
+                return when {
+                    onDevice -> SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+                    component != null -> SpeechRecognizer.createSpeechRecognizer(context, component)
+                    defaultRecognizer -> SpeechRecognizer.createSpeechRecognizer(context)
+                    else -> SpeechRecognizer.createSpeechRecognizer(context)
+                }
+            }
+        }
+
+        private const val TAG = "RelayAndroidCxrStt"
+        private const val GOOGLE_PACKAGE_PREFIX = "com.google.android"
+        private const val VOICE_RECOGNITION_SERVICE_SETTING = "voice_recognition_service"
+        private const val DEFAULT_TARGET_ID = "default"
+        private const val ON_DEVICE_TARGET_ID = "on-device"
+        private const val ON_DEVICE_COMPONENT_LABEL = "SpeechRecognizer.createOnDeviceSpeechRecognizer"
+        private const val DEFAULT_COMPONENT_LABEL = "SpeechRecognizer.createSpeechRecognizer(default)"
+        private const val CXR_AUDIO_PCM = 1
+        private const val SAMPLE_RATE_HZ = 16_000
+        private const val CXR_AUDIO_FIRST_BYTE_TIMEOUT_MS = 6_000L
+        private const val SPEECH_INPUT_MINIMUM_LENGTH_MS = 2_500L
+        private const val SPEECH_POSSIBLY_COMPLETE_SILENCE_MS = 2_500L
+        private const val SPEECH_COMPLETE_SILENCE_MS = 3_000L
+        private const val DIAGNOSTICS_UPDATE_MS = 500L
+        private const val VAD_CHECK_INTERVAL_MS = 120L
+        private const val FINAL_RESULT_TIMEOUT_MS = 2_500L
+        private val WORD_SPLIT_REGEX = Regex("\\s+")
     }
 }
