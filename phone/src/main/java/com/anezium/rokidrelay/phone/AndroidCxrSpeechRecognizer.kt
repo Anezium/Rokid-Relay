@@ -59,6 +59,8 @@ class AndroidCxrSpeechRecognizer(
     private var inputClosed = false
     private var inputCloseReason = ""
     private var microphoneForegroundRequested = false
+    private var stopListeningOnInputClose = false
+    private val segmentTranscripts = mutableListOf<String>()
 
     fun start(): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
@@ -104,6 +106,7 @@ class AndroidCxrSpeechRecognizer(
             return false
         }
         recognizer = localRecognizer
+        stopListeningOnInputClose = target.stopListeningOnInputClose
         localRecognizer.setRecognitionListener(recognitionListener(localRecognizer))
         val intent = android.content.Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -118,7 +121,9 @@ class AndroidCxrSpeechRecognizer(
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, SPEECH_COMPLETE_SILENCE_MS)
             putExtra(RecognizerIntent.EXTRA_PROMPT, "Rokid Relay")
             putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE, readFd)
-            putExtra(RecognizerIntent.EXTRA_SEGMENTED_SESSION, RecognizerIntent.EXTRA_AUDIO_SOURCE)
+            if (target.segmentedSession) {
+                putExtra(RecognizerIntent.EXTRA_SEGMENTED_SESSION, RecognizerIntent.EXTRA_AUDIO_SOURCE)
+            }
             putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_SAMPLING_RATE, SAMPLE_RATE_HZ)
             putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_CHANNEL_COUNT, 1)
             putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_ENCODING, AudioFormat.ENCODING_PCM_16BIT)
@@ -127,7 +132,8 @@ class AndroidCxrSpeechRecognizer(
             Log.i(
                 TAG,
                 "Android CXR recognizer attempt target=${target.reportName} " +
-                    "tag=${languageTag?.takeIf { it.isNotBlank() } ?: "auto"}",
+                    "tag=${languageTag?.takeIf { it.isNotBlank() } ?: "auto"} " +
+                    "segmented=${target.segmentedSession}",
             )
             localRecognizer.startListening(intent)
             listener.onListening()
@@ -146,11 +152,9 @@ class AndroidCxrSpeechRecognizer(
         }
     }
 
-    // EXTRA_AUDIO_SOURCE (injected-audio) is only honored by recognizers that actually
-    // support it. The system-default recognizer on some OEMs (e.g. Samsung) ignores the
-    // injected pipe and silently reads the phone mic instead, which yields ERROR_NO_MATCH
-    // even though glasses audio is flowing. Walk Google-capable recognizers first, then the
-    // on-device recognizer, then fall back to the system default.
+    // Start with Android's system-default recognizer because that is the v0.1.7-proven
+    // injected CXR audio path: system default, non-segmented, stopListening on pipe close.
+    // Later targets are only reached when a recognizer reports language-support errors.
 
     private fun startCxrAudioSource(): ParcelFileDescriptor? {
         return runCatching {
@@ -164,6 +168,7 @@ class AndroidCxrSpeechRecognizer(
                 inputClosed = false
                 inputCloseReason = ""
                 bestPartialTranscript = ""
+                segmentTranscripts.clear()
                 lastDiagnosticsAtMs = 0L
                 voiceActivityDetector.reset(SystemClock.elapsedRealtime())
             }
@@ -285,9 +290,9 @@ class AndroidCxrSpeechRecognizer(
                         "speech=${snapshot.speechDetected} level=${snapshot.averageAbs} peak=${snapshot.peakAbs}",
                 )
                 if (!isActive(owner)) return
-                val partial = bestPartialTranscript.trim()
-                if (partial.isNotBlank() && error.allowsPartialFallback(inputClosed)) {
-                    complete(partial, "${inputCloseReason.ifBlank { "android-partial" }} error=$error")
+                val transcript = bestAvailableTranscript()
+                if (transcript.isNotBlank() && error.allowsPartialFallback(inputClosed)) {
+                    complete(transcript, "${inputCloseReason.ifBlank { "android-partial" }} error=$error")
                 } else if (error.isLanguageSupportError()) {
                     recoverUnsupportedLanguage(error.toVoiceMessage(inputClosed))
                 } else if (error.isRecoverableRecognizerError()) {
@@ -301,7 +306,7 @@ class AndroidCxrSpeechRecognizer(
                 if (!isActive(owner)) return
                 val finalText = results.bestRecognizerText()
                 Log.i(TAG, "recognizer onResults final='$finalText' partial='$bestPartialTranscript'")
-                val text = bestCompleteTranscript(finalText, bestPartialTranscript)
+                val text = bestCompleteTranscript(finalText, bestAvailableTranscript())
                 complete(text, "android-cxr")
             }
 
@@ -313,6 +318,22 @@ class AndroidCxrSpeechRecognizer(
                     bestPartialTranscript = mergeTranscriptWindow(bestPartialTranscript, partial)
                     listener.onRecognizing(bestPartialTranscript)
                 }
+            }
+
+            override fun onSegmentResults(segmentResults: Bundle) {
+                if (!isActive(owner)) return
+                val segmentText = segmentResults.bestRecognizerText()
+                Log.i(TAG, "recognizer onSegmentResults segment='$segmentText'")
+                if (segmentText.isNotBlank()) {
+                    segmentTranscripts += segmentText
+                    listener.onRecognizing(bestAvailableTranscript())
+                }
+            }
+
+            override fun onEndOfSegmentedSession() {
+                if (!isActive(owner)) return
+                Log.i(TAG, "recognizer onEndOfSegmentedSession")
+                complete(bestAvailableTranscript(), "android-cxr-segments")
             }
 
             override fun onEvent(eventType: Int, params: Bundle?) = Unit
@@ -388,6 +409,7 @@ class AndroidCxrSpeechRecognizer(
 
     private fun closeRecognizerInput(reason: String) {
         if (finished) return
+        val localRecognizer = recognizer
         synchronized(audioLock) {
             if (inputClosed) return
             inputClosed = true
@@ -401,8 +423,9 @@ class AndroidCxrSpeechRecognizer(
         firstByteTimeout = null
         runCatching { link.stopAudioStream() }
         runCatching { link.setCXRAudioCbk(null) }
-        // In segmented injected-audio mode, closing the pipe is the end-of-input signal.
-        // Some recognizers drop the final result if stopListening() is sent as well.
+        if (stopListeningOnInputClose) {
+            runCatching { localRecognizer?.stopListening() }
+        }
         scheduleFinalResultTimeout(reason)
     }
 
@@ -410,9 +433,9 @@ class AndroidCxrSpeechRecognizer(
         finalResultTimeout?.let(main::removeCallbacks)
         val timeout = Runnable {
             if (finished) return@Runnable
-            val partial = bestPartialTranscript.trim()
-            if (partial.isNotBlank()) {
-                complete(partial, "android-partial-timeout $reason")
+            val transcript = bestAvailableTranscript()
+            if (transcript.isNotBlank()) {
+                complete(transcript, "android-partial-timeout $reason")
             } else {
                 Log.w(TAG, "Android recognizer produced no text after CXR input closed reason=$reason")
                 fail(noTranscriptMessage())
@@ -466,6 +489,11 @@ class AndroidCxrSpeechRecognizer(
     private fun Bundle?.bestRecognizerText(): String {
         val values = this?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
         return values.firstOrNull { it.isNotBlank() }?.trim().orEmpty()
+    }
+
+    private fun bestAvailableTranscript(): String {
+        val segments = segmentTranscripts.joinToString(" ").trim()
+        return bestCompleteTranscript(segments, bestPartialTranscript)
     }
 
     private fun bestCompleteTranscript(finalText: String, partialText: String): String {
@@ -580,15 +608,16 @@ class AndroidCxrSpeechRecognizer(
                 if (targetIds.add(target.id)) targets += target
             }
 
-            if (defaultComponent?.isGoogleRecognitionService() == true) {
-                addTarget(
-                    RecognizerTarget(
-                        id = DEFAULT_TARGET_ID,
-                        reportName = "default:${defaultComponent.flattenToShortString()}",
-                        defaultRecognizer = true,
-                    ),
-                )
-            }
+            addTarget(
+                RecognizerTarget(
+                    id = DEFAULT_TARGET_ID,
+                    reportName = "default:${defaultComponent?.flattenToShortString() ?: DEFAULT_COMPONENT_LABEL}",
+                    defaultRecognizer = true,
+                    segmentedSession = false,
+                    stopListeningOnInputClose = true,
+                    warnInjectedAudio = defaultComponent?.isGoogleRecognitionService() != true,
+                ),
+            )
 
             googleRecognitionComponents(context)
                 .filter { component -> component != defaultComponent }
@@ -611,15 +640,6 @@ class AndroidCxrSpeechRecognizer(
                     ),
                 )
             }
-
-            addTarget(
-                RecognizerTarget(
-                    id = DEFAULT_TARGET_ID,
-                    reportName = "default:${defaultComponent?.flattenToShortString() ?: DEFAULT_COMPONENT_LABEL}",
-                    defaultRecognizer = true,
-                    warnInjectedAudio = true,
-                ),
-            )
             return targets
         }
 
@@ -650,11 +670,13 @@ class AndroidCxrSpeechRecognizer(
             val component: ComponentName? = null,
             val onDevice: Boolean = false,
             val defaultRecognizer: Boolean = false,
+            val segmentedSession: Boolean = true,
+            val stopListeningOnInputClose: Boolean = false,
             val warnInjectedAudio: Boolean = false,
         ) {
             fun create(context: Context): SpeechRecognizer {
                 if (warnInjectedAudio) {
-                    Log.w(TAG, "Falling back to system-default recognizer (may ignore injected audio)")
+                    Log.w(TAG, "Using non-Google system-default recognizer (may ignore injected audio)")
                 }
                 return when {
                     onDevice -> SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
