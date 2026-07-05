@@ -175,7 +175,7 @@ object VoiceController {
 
                 override fun onError(message: String) {
                     if (voiceActive && activeRecognizer === recognizerRef && activeNotificationId == notificationId) {
-                        failVoiceRecognition(message)
+                        failVoiceRecognition(androidCxrLanguageFailureMessage(language, message))
                     }
                 }
 
@@ -568,6 +568,17 @@ object VoiceController {
 
     private fun failActiveVoice(message: String) {
         failVoiceRecognition(message)
+    }
+
+    private fun androidCxrLanguageFailureMessage(language: TranscriptionLanguage, message: String): String {
+        if (
+            message != "Speech language not supported" &&
+            message != "Speech language unavailable"
+        ) {
+            return message
+        }
+        val tried = language.androidTagChain() + "auto"
+        return "$message (tried ${tried.joinToString(", ")})"
     }
 
     private fun cancelOnMain(sendIdle: Boolean) {

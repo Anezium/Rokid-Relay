@@ -1163,6 +1163,16 @@ class MainActivity : Activity() {
                     renderStatus()
                 },
             ), matchWrap(top = 8))
+            if (speechDiagnosticAvailable()) {
+                setupRows.addView(setupRow(
+                    title = "Speech diagnostic",
+                    value = "Android recognizer report",
+                    tone = StatusTone.Neutral,
+                    actionLabel = "Run",
+                    actionTone = ButtonTone.Secondary,
+                    onClick = { openSpeechDiagnostic() },
+                ), matchWrap(top = 8))
+            }
             setupRows.addView(setupRow(
                 title = "Companion link",
                 value = if (companionLinked) "Glasses linked" else "Needed for background wake",
@@ -2309,6 +2319,22 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun speechDiagnosticIntent(): Intent =
+        Intent().setClassName(packageName, SPEECH_DIAGNOSTIC_ACTIVITY)
+
+    private fun speechDiagnosticAvailable(): Boolean =
+        runCatching {
+            packageManager.resolveActivity(speechDiagnosticIntent(), 0) != null
+        }.getOrDefault(false)
+
+    private fun openSpeechDiagnostic() {
+        runCatching {
+            startActivity(speechDiagnosticIntent())
+        }.onFailure {
+            toastLine("Speech diagnostic unavailable in this build.")
+        }
+    }
+
     private fun savedToken(): String? =
         prefs().getString(Constants.PREF_AUTH_TOKEN, null)
 
@@ -2369,6 +2395,8 @@ class MainActivity : Activity() {
         private const val FOREGROUND_REFRESH_DELAY_MS = 250L
         private const val SELF_ARM_AUTO_PREPARE_INTERVAL_MS = 30_000L
         private const val LANGUAGE_GRID_COLUMNS = 3
+        private const val SPEECH_DIAGNOSTIC_ACTIVITY =
+            "com.anezium.rokidrelay.phone.SpeechRecognizerLanguageProbeActivity"
         val COLOR_APP_BG: Int = Color.rgb(4, 10, 6)
         val COLOR_PANEL: Int = Color.rgb(8, 18, 11)
         val COLOR_PANEL_ALT: Int = Color.rgb(11, 29, 16)
