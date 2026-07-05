@@ -35,6 +35,8 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
+import com.anezium.rokidrelay.phone.selfarm.adb.AdbBridgeClient
+import java.util.Locale
 
 class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
@@ -647,7 +649,7 @@ class MainActivity : Activity() {
                 ""
             }
             selfArmPairingCodeInput = EditText(this@MainActivity).apply {
-                hint = "Pairing code"
+                hint = "6-digit code from glasses (only if asked)"
                 setText(savedCode)
                 inputType = InputType.TYPE_CLASS_NUMBER
                 imeOptions = EditorInfo.IME_ACTION_DONE
@@ -665,7 +667,13 @@ class MainActivity : Activity() {
                     this@MainActivity,
                     selfArmPairingCodeInput.text.toString(),
                 )
-                toastLine(if (accepted) "Pairing with Wireless Debugging" else "Enter the 6-digit code")
+                toastLine(
+                    if (accepted) {
+                        "Pairing with the glasses…"
+                    } else {
+                        "Enter the 6-digit code shown on the glasses"
+                    },
+                )
                 renderStatus()
             }, LinearLayout.LayoutParams(dp(82), dp(42)).apply {
                 leftMargin = dp(8)
@@ -1190,10 +1198,14 @@ class MainActivity : Activity() {
                 value = when {
                     selfArmDisablePending -> "Disable pending"
                     selfArmProvisioned -> "Recovery armed"
-                    selfArmWireless.complete -> "Wireless bootstrap ready"
-                    selfArmWireless.lastError.isNotBlank() -> "Last bootstrap error: ${selfArmWireless.lastError}"
-                    selfArmWireless.inProgress -> selfArmWireless.status.ifBlank { "Wireless bootstrap running" }
-                    relayEnabled -> "Needs Wireless Debugging bootstrap"
+                    selfArmWireless.complete -> friendlyWirelessStatus(
+                        selfArmWireless.status.ifBlank { "complete" },
+                    )
+                    selfArmWireless.lastError.isNotBlank() ->
+                        friendlyWirelessStatus(selfArmWireless.lastError)
+                    selfArmWireless.inProgress -> friendlyWirelessStatus(selfArmWireless.status)
+                    relayEnabled ->
+                        "Not set up — put phone and glasses on the same Wi-Fi, then tap Bootstrap"
                     else -> "Off"
                 },
                 tone = when {
@@ -1282,6 +1294,10 @@ class MainActivity : Activity() {
                     "Operational. Phone bridge and glasses app are ready."
                 RelayService.running -> "Awake. Relay will sleep again after the reply window."
                 SelfArmProvisioner.provisioned(this) -> "Armed. Self-arm provisioned for glasses recovery."
+                RelayStarter.isRelayEnabled(this) &&
+                    !SelfArmProvisioner.provisioned(this) &&
+                    !SelfArmProvisioner.wirelessBootstrapped(this) ->
+                    "Self-arm setup: put the phone and glasses on the same Wi-Fi, keep the glasses on, then tap Bootstrap on the Self-arm recovery row."
                 SelfArmProvisioner.wirelessBootstrapped(this) ->
                     "Wireless bootstrap is complete. Start Self-arm recovery once to arm direct repair."
                 RelayStarter.isRelayEnabled(this) -> "Armed. Relay wakes on replyable notifications or inbox reply attempts."
@@ -2058,6 +2074,50 @@ class MainActivity : Activity() {
         return true
     }
 
+    private fun friendlyWirelessStatus(raw: String): String {
+        val text = raw.trim()
+        val value = text.lowercase(Locale.US)
+        return when {
+            value.contains("complete") || value.contains("bootstrap ready") ->
+                "Glasses recovery is ready"
+            value.contains("same wi-fi") || value.contains("same network") || value.contains("reach") ->
+                text
+            value.contains("pairing wireless") ||
+                value.contains("pairing ready") ||
+                value.contains("pairing…") ||
+                value.contains("pairing with") ->
+                "Pairing with the glasses…"
+            value.contains("pairing code read") ||
+                value.contains("waiting_for_pairing") ||
+                value.contains("searching_pairing") ||
+                value.contains("opening_pairing") ->
+                "Reading the pairing code from the glasses…"
+            value.contains("wifi") ||
+                value.contains("developer") ||
+                value.contains("wireless_debugging") ||
+                value.contains("starting_wireless") ||
+                value.contains("wireless debugging open") ||
+                value.contains("wifi_on") ->
+                "Setting up the glasses…"
+            value.contains("timeout") || value.contains("manual_step") ->
+                "Couldn't finish on the glasses. Keep the glasses on and tap Bootstrap again."
+            value.contains("expired") ->
+                "The pairing code expired. Tap Bootstrap to try again."
+            value.contains("failed") -> {
+                val failedPrefix = "failed:"
+                val failedIndex = value.indexOf(failedPrefix)
+                if (failedIndex >= 0) {
+                    text.substring(failedIndex + failedPrefix.length).trim().ifBlank {
+                        "Bootstrap failed. Keep both on the same Wi-Fi and tap Bootstrap again."
+                    }
+                } else {
+                    "Bootstrap failed. Keep both on the same Wi-Fi and tap Bootstrap again."
+                }
+            }
+            else -> "Setting up glasses recovery…"
+        }
+    }
+
     private fun relaunchRelayOrAuthorize(): Boolean {
         if (savedAuthToken().isNullOrBlank()) {
             armRelayAfterAuth = true
@@ -2073,6 +2133,7 @@ class MainActivity : Activity() {
     }
 
     private fun prepareSelfArmRecoveryOrAuthorize() {
+        if (wirelessBootstrapBlockedByPhoneWifi()) return
         if (savedAuthToken().isNullOrBlank()) {
             selfArmAfterAuth = true
             requestHiRokidAuthorization(auto = false, reason = RelayStarter.START_REASON_SELF_ARM)
@@ -2095,10 +2156,21 @@ class MainActivity : Activity() {
         BleWakeServer.ensureStarted(this)
         RelayBridge.setStatus("Self-arm provisioning: opening glasses link")
         if (!SelfArmProvisioner.wirelessBootstrapped(this)) {
+            if (wirelessBootstrapBlockedByPhoneWifi()) return false
             RelayBridge.requestSelfArmWirelessBootstrap(this)
         }
         lastSelfArmAutoPrepareAtMs = SystemClock.elapsedRealtime()
         Log.i(TAG_SELF_ARM, "self-arm provisioning link started")
+        return true
+    }
+
+    private fun wirelessBootstrapBlockedByPhoneWifi(): Boolean {
+        if (SelfArmProvisioner.wirelessBootstrapped(this)) return false
+        if (AdbBridgeClient.phoneWifiLanIpv4(this).isNotBlank()) return false
+        val message =
+            "Connect this phone to Wi-Fi first — the same network as your glasses — then tap Bootstrap."
+        SelfArmProvisioner.markWirelessBootstrapFailed(this, status = message, error = message)
+        toastLine(message)
         return true
     }
 

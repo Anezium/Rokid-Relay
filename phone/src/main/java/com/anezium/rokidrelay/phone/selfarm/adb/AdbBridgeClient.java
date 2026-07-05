@@ -40,6 +40,10 @@ public final class AdbBridgeClient {
         this.mdnsResolver = new AdbMdnsPairingResolver(this.context);
     }
 
+    public static String phoneWifiLanIpv4(Context context) {
+        return phoneWifiIpv4();
+    }
+
     public BootstrapResult bootstrapWirelessDebugging(
             String host,
             int pairingPort,
@@ -266,7 +270,7 @@ public final class AdbBridgeClient {
         return phoneIp;
     }
 
-    private String phoneWifiIpv4() {
+    private static String phoneWifiIpv4() {
         try {
             Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
             while (interfaces.hasMoreElements()) {
@@ -291,7 +295,7 @@ public final class AdbBridgeClient {
         return "";
     }
 
-    private boolean isWifiLikeInterface(String name) {
+    private static boolean isWifiLikeInterface(String name) {
         String value = name == null ? "" : name.toLowerCase(java.util.Locale.US);
         return value.equals("wlan0")
                 || value.startsWith("wlan")
@@ -301,7 +305,7 @@ public final class AdbBridgeClient {
                 || value.contains("swlan");
     }
 
-    private boolean isPrivateLanAddress(String host) {
+    private static boolean isPrivateLanAddress(String host) {
         if (host == null) {
             return false;
         }
