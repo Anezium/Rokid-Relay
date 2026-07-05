@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Added a PC-free one-time Wireless Debugging bootstrap for self-arm recovery: the phone pairs with KADB, grants `WRITE_SECURE_SETTINGS`, enables adb-wifi, persists ADB TCP port `5555`, and trusts the Relay recovery public key.
+- Restored the R08-proven glasses automation for the bootstrap: Wi-Fi opens through the Android Wi-Fi panel first, the toggle is tapped and retried by AccessibilityService gestures, Developer Options can be enabled from build-number fallback, Wireless Debugging is opened/confirmed, and the pairing dialog is held while the phone pairs.
+- Added glasses-side Wireless Debugging automation that uses all accessibility window roots to read the 6-digit pairing code from Rokid MockWindow dialogs, with an always-visible manual phone code entry fallback while wireless bootstrap is active.
+- Documented the required accessibility service capabilities for RG (`flagIncludeNotImportantViews`, `flagReportViewIds`, `canPerformGestures`, and touch-exploration request support).
+- Made glasses self-arm direct `WRITE_SECURE_SETTINGS` repair the primary success path and triggered it from `RelayAccessibilityService.onServiceConnected()`, avoiding reliance on `BOOT_COMPLETED` after stopped-state force stops.
+- Stopped trying to open or close ADB TCP from the glasses app uid; loopback ADB is now a secondary fallback provided by the shell-uid bootstrap.
+
 ## v0.1.15-preview.17 - 2026-07-03
 
 - Serialized all phone-side CXR-L link callbacks and bridge state changes onto the main thread, removing races between connect/disconnect events and the glasses bootstrap.

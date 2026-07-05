@@ -21,11 +21,20 @@ class ClientBootstrap(
     )
 
     fun ensureReady(openAfterInstall: Boolean = false): Result {
-        val installed = queryInstalled()
+        val installedState = queryInstalled()
         val apk = extractAssetApk()
         val assetInfo = apk?.clientAssetInfo()
         val rememberedClient = rememberedClientFingerprint() != null
-        val shouldInstall = !installed || bundledClientChanged(assetInfo)
+        val bundledChanged = bundledClientChanged(assetInfo)
+        // A transient CXR appIsInstalled timeout (installedState == null) must not force a
+        // disruptive reinstall/relaunch when we have already provisioned a matching client;
+        // trust the remembered fingerprint instead so the message link can go ready.
+        val installed = when (installedState) {
+            true -> true
+            false -> false
+            null -> rememberedClient && !bundledChanged
+        }
+        val shouldInstall = !installed || bundledChanged
         if (!shouldInstall) {
             if (clientLaunchPending()) {
                 if (openAfterInstall) {
@@ -109,7 +118,7 @@ class ClientBootstrap(
         }
     }
 
-    private fun queryInstalled(): Boolean {
+    private fun queryInstalled(): Boolean? {
         val latch = CountDownLatch(1)
         val result = AtomicBoolean(false)
         link.appIsInstalled(object : IGlassAppCbk {
@@ -118,7 +127,7 @@ class ClientBootstrap(
                 latch.countDown()
             }
         })
-        return await(latch, 5_000L, "query") && result.get()
+        return if (await(latch, 5_000L, "query")) result.get() else null
     }
 
     private fun installApk(apk: File): Boolean {

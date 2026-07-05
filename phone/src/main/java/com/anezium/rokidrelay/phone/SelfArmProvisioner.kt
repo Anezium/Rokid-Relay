@@ -6,10 +6,25 @@ import java.io.File
 
 object SelfArmProvisioner {
     private const val PREF_DISABLE_REQUESTED_AT_MS = "self_arm_disable_requested_at_ms"
+    private const val PREF_WIRELESS_BOOTSTRAPPED = "self_arm_wireless_bootstrapped"
+    private const val PREF_WIRELESS_BOOTSTRAP_STATUS = "self_arm_wireless_bootstrap_status"
+    private const val PREF_WIRELESS_BOOTSTRAP_IN_PROGRESS = "self_arm_wireless_bootstrap_in_progress"
+    private const val PREF_WIRELESS_BOOTSTRAP_HOST = "self_arm_wireless_bootstrap_host"
+    private const val PREF_WIRELESS_BOOTSTRAP_PAIR_PORT = "self_arm_wireless_bootstrap_pair_port"
+    private const val PREF_WIRELESS_BOOTSTRAP_CONNECT_PORT = "self_arm_wireless_bootstrap_connect_port"
 
     data class Provision(
         val json: JSONObject,
         val keyPresent: Boolean,
+    )
+
+    data class WirelessBootstrap(
+        val complete: Boolean,
+        val inProgress: Boolean,
+        val status: String,
+        val host: String,
+        val pairPort: Int,
+        val connectPort: Int,
     )
 
     fun buildProvision(context: Context): Provision {
@@ -86,10 +101,81 @@ object SelfArmProvisioner {
             .apply()
     }
 
+    fun markWirelessBootstrapRequested(context: Context, status: String = "Opening Wireless Debugging") {
+        context.applicationContext
+            .getSharedPreferences(Constants.PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(PREF_WIRELESS_BOOTSTRAP_IN_PROGRESS, true)
+            .putString(PREF_WIRELESS_BOOTSTRAP_STATUS, status)
+            .apply()
+    }
+
+    fun markWirelessPairingDiscovered(
+        context: Context,
+        host: String,
+        pairPort: Int,
+        connectPort: Int,
+        status: String = "Pairing code ready",
+    ) {
+        context.applicationContext
+            .getSharedPreferences(Constants.PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(PREF_WIRELESS_BOOTSTRAP_IN_PROGRESS, true)
+            .putString(PREF_WIRELESS_BOOTSTRAP_STATUS, status)
+            .putString(PREF_WIRELESS_BOOTSTRAP_HOST, host)
+            .putInt(PREF_WIRELESS_BOOTSTRAP_PAIR_PORT, pairPort)
+            .putInt(PREF_WIRELESS_BOOTSTRAP_CONNECT_PORT, connectPort)
+            .apply()
+    }
+
+    fun markWirelessBootstrapComplete(
+        context: Context,
+        host: String,
+        connectPort: Int,
+        status: String = "Wireless ADB bootstrap complete",
+    ) {
+        context.applicationContext
+            .getSharedPreferences(Constants.PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(PREF_WIRELESS_BOOTSTRAPPED, true)
+            .putBoolean(PREF_WIRELESS_BOOTSTRAP_IN_PROGRESS, false)
+            .putString(PREF_WIRELESS_BOOTSTRAP_STATUS, status)
+            .putString(PREF_WIRELESS_BOOTSTRAP_HOST, host)
+            .putInt(PREF_WIRELESS_BOOTSTRAP_CONNECT_PORT, connectPort)
+            .apply()
+    }
+
+    fun markWirelessBootstrapFailed(context: Context, status: String) {
+        context.applicationContext
+            .getSharedPreferences(Constants.PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(PREF_WIRELESS_BOOTSTRAP_IN_PROGRESS, false)
+            .putString(PREF_WIRELESS_BOOTSTRAP_STATUS, status)
+            .apply()
+    }
+
     fun provisioned(context: Context): Boolean =
         context.applicationContext
             .getSharedPreferences(Constants.PREFS, Context.MODE_PRIVATE)
             .getBoolean(Constants.PREF_SELF_ARM_PROVISIONED, false)
+
+    fun wirelessBootstrapped(context: Context): Boolean =
+        context.applicationContext
+            .getSharedPreferences(Constants.PREFS, Context.MODE_PRIVATE)
+            .getBoolean(PREF_WIRELESS_BOOTSTRAPPED, false)
+
+    fun wirelessBootstrap(context: Context): WirelessBootstrap {
+        val prefs = context.applicationContext
+            .getSharedPreferences(Constants.PREFS, Context.MODE_PRIVATE)
+        return WirelessBootstrap(
+            complete = prefs.getBoolean(PREF_WIRELESS_BOOTSTRAPPED, false),
+            inProgress = prefs.getBoolean(PREF_WIRELESS_BOOTSTRAP_IN_PROGRESS, false),
+            status = prefs.getString(PREF_WIRELESS_BOOTSTRAP_STATUS, "").orEmpty(),
+            host = prefs.getString(PREF_WIRELESS_BOOTSTRAP_HOST, "").orEmpty(),
+            pairPort = prefs.getInt(PREF_WIRELESS_BOOTSTRAP_PAIR_PORT, 0),
+            connectPort = prefs.getInt(PREF_WIRELESS_BOOTSTRAP_CONNECT_PORT, 0),
+        )
+    }
 
     fun keyPresent(context: Context): Boolean =
         context.applicationContext
@@ -115,6 +201,9 @@ object SelfArmProvisioner {
             privateKeyFile(context.applicationContext).readText().isNotBlank() &&
                 publicKeyFile(context.applicationContext).readText().isNotBlank()
         }.getOrDefault(false)
+
+    fun ensureWirelessBootstrapPublicKey(context: Context): String =
+        ensureKeyMaterial(context.applicationContext).publicKey
 
     internal fun ensureKeyMaterial(context: Context): AdbKeyGenerator.GeneratedKey {
         val privateFile = privateKeyFile(context)

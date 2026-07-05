@@ -64,6 +64,7 @@ class RelayAccessibilityService : AccessibilityService() {
     private var lastReplyWakeAtMs = 0L
     private val grabbedKeys = HashSet<Int>()
     private val inputInterpreter = RelayInputInterpreter()
+    private var wirelessDebuggingAutomator: SelfArmWirelessDebuggingAutomator? = null
     private val singleTapRunnable = Runnable {
         executeInputActions(
             inputInterpreter.handleSingleTapTimer(RelayHudController.inputSnapshot()).actions,
@@ -95,22 +96,28 @@ class RelayAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        activeService = this
         serviceInfo = serviceInfo.apply {
             flags = flags or
                 AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS or
-                AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+                AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or
+                AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
         }
+        wirelessDebuggingAutomator = SelfArmWirelessDebuggingAutomator(this, main)
         RelayHudController.setNotificationOverlayYOffset(NotificationOverlaySettings.yOffsetDp(this))
         RelayHudController.setNotificationFontSizeSp(NotificationOverlaySettings.fontSizeSp(this))
         RelayHudController.refreshAccessibility(this)
         RelayHudController.addNotificationShownListener(notificationWakeListener)
         RelayHudController.addStateListener(replyWakeListener)
         RelayBridge.start(this)
+        SelfArmController.maybeStart(this, "accessibility_service_connected")
         showOverlay()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
+        AccessibilityWindowRoots.noteEvent(event, packageName)
+        wirelessDebuggingAutomator?.onAccessibilityEvent(event)
         maybeAcceptAdbAuthorizationDialog(event)
     }
 
@@ -166,6 +173,9 @@ class RelayAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         hideOverlay()
+        wirelessDebuggingAutomator?.stop()
+        wirelessDebuggingAutomator = null
+        if (activeService === this) activeService = null
         runCatching { unregisterReceiver(twoFingerReceiver) }
         main.removeCallbacks(singleTapRunnable)
         inputInterpreter.resetTransientState()
@@ -481,6 +491,24 @@ class RelayAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val TAG = "RelayAccessibility"
+        @Volatile private var activeService: RelayAccessibilityService? = null
+
+        fun startSelfArmWirelessSetup(): Boolean {
+            val service = activeService
+            if (service == null) {
+                RelayBridge.sendSelfArmWirelessStatus(
+                    setupState = "accessibility_service_needed",
+                    wifiIp = "",
+                    adbConnectPort = 0,
+                )
+                return false
+            }
+            service.main.post {
+                service.wirelessDebuggingAutomator?.start()
+            }
+            return true
+        }
+
         private val ADB_AUTH_PROMPT_PACKAGES = setOf(
             "android",
             "com.android.settings",

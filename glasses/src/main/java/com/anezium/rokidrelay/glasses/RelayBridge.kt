@@ -266,6 +266,16 @@ object RelayBridge {
                     }
                 }
             }
+            "self_arm_wireless_setup" -> {
+                val started = RelayAccessibilityService.startSelfArmWirelessSetup()
+                if (!started) {
+                    sendSelfArmWirelessStatus(
+                        setupState = "accessibility_service_needed",
+                        wifiIp = "",
+                        adbConnectPort = 0,
+                    )
+                }
+            }
             "notification" -> {
                 applySettings(obj)
                 RelayHudController.showNotification(
@@ -378,6 +388,27 @@ object RelayBridge {
             combo = if (obj.has("inputCombo")) obj.optString("inputCombo") else null,
             swipeMode = if (obj.has("swipeMode")) obj.optString("swipeMode") else null,
         )
+    }
+
+    fun sendSelfArmWirelessStatus(
+        setupState: String,
+        wifiIp: String,
+        adbPairCode: String = "",
+        adbPairHost: String = "",
+        adbPairPort: Int = 0,
+        adbConnectPort: Int = 0,
+    ) {
+        sendCommand("self_arm_wireless_status") {
+            put("setupState", setupState)
+            put("wifiIp", wifiIp)
+            if (adbPairCode.isNotBlank()) put("adbPairCode", adbPairCode)
+            if (adbPairHost.isNotBlank()) put("adbPairHost", adbPairHost)
+            if (adbPairPort > 0) put("adbPairPort", adbPairPort)
+            if (adbConnectPort > 0) {
+                put("adbConnectPort", adbConnectPort)
+                put("adbPort", adbConnectPort)
+            }
+        }
     }
 
     private fun sendCommand(type: String, block: JSONObject.() -> Unit = {}) {

@@ -229,6 +229,11 @@ object SelfArmController {
     ): Boolean {
         val scriptFile = ensureInternalWatchdog(context)
         val repairedDirectly = repairAccessibilityDirect(context)
+        if (repairedDirectly) {
+            clearEnrollmentPending(context)
+            Log.i(TAG, "self-arm reason=$reason direct repair succeeded; watchdog fallback skipped")
+            return true
+        }
         val keyMaterial = loadKeyMaterial(context)
         if (keyMaterial == null) {
             Log.i(
@@ -237,7 +242,10 @@ object SelfArmController {
             )
             return if (requireWatchdog) false else repairedDirectly
         }
-        ensureAdbLoopbackPort()
+        if (!ensureAdbLoopbackPort()) {
+            Log.i(TAG, "ADB loopback not listening reason=$reason; waiting for shell-uid bootstrap")
+            return if (requireWatchdog) false else repairedDirectly
+        }
         val command = buildInstallCommand(scriptFile.readText(), action = "restart")
         val client = AdbLoopbackClient(port = ADB_PORT)
         val result = client.runShell(command, keyMaterial)
@@ -288,20 +296,16 @@ object SelfArmController {
         return false
     }
 
-    private fun ensureAdbLoopbackPort() {
-        if (adbLoopbackListening()) return
+    private fun ensureAdbLoopbackPort(): Boolean {
+        if (adbLoopbackListening()) return true
         val persist = shell("getprop persist.adb.tcp.port").trim()
         val service = shell("getprop service.adb.tcp.port").trim()
-        if (persist != "$ADB_PORT") shell("setprop persist.adb.tcp.port $ADB_PORT")
-        if (service != "$ADB_PORT") shell("setprop service.adb.tcp.port $ADB_PORT")
-        shell("setprop ctl.restart adbd")
-        Thread.sleep(3_000L)
+        Log.i(TAG, "ADB loopback unavailable persist=$persist service=$service; not setting props as app uid")
+        return false
     }
 
     private fun disableAdbLoopbackPort() {
-        shell("setprop persist.adb.tcp.port -1")
-        shell("setprop service.adb.tcp.port -1")
-        shell("setprop ctl.restart adbd")
+        Log.i(TAG, "ADB loopback disable skipped from app uid")
     }
 
     private fun adbLoopbackListening(): Boolean {

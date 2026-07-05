@@ -25,8 +25,14 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    packaging {
+        resources {
+            excludes += "META-INF/versions/**"
+        }
     }
 }
 
@@ -34,6 +40,9 @@ dependencies {
     implementation("com.example.cxrglobal:lib:0.2.0")
     implementation("androidx.core:core:1.18.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("dev.mobile:dadb:1.2.10")
+    implementation("com.flyfishxu:kadb:2.1.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.13")
 }

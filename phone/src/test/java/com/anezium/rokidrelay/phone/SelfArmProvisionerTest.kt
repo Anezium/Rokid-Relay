@@ -8,6 +8,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.RobolectricTestRunner
+import com.anezium.rokidrelay.phone.selfarm.adb.AdbBridgeClient
 import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
@@ -90,5 +91,37 @@ class SelfArmProvisionerTest {
         SelfArmProvisioner.markDisableRequested(context)
 
         assertTrue(SelfArmProvisioner.disablePending(context))
+    }
+
+    @Test
+    fun wirelessBootstrapStateTracksCompletionSeparatelyFromProvisioning() {
+        val context = RuntimeEnvironment.getApplication() as Context
+
+        SelfArmProvisioner.markWirelessBootstrapRequested(context, "Opening Wireless Debugging")
+        var state = SelfArmProvisioner.wirelessBootstrap(context)
+
+        assertFalse(state.complete)
+        assertTrue(state.inProgress)
+        assertEquals("Opening Wireless Debugging", state.status)
+
+        SelfArmProvisioner.markWirelessBootstrapComplete(context, "192.168.1.84", 33093)
+        state = SelfArmProvisioner.wirelessBootstrap(context)
+
+        assertTrue(state.complete)
+        assertFalse(state.inProgress)
+        assertFalse(SelfArmProvisioner.provisioned(context))
+        assertEquals("192.168.1.84", state.host)
+        assertEquals(33093, state.connectPort)
+    }
+
+    @Test
+    fun wirelessBootstrapCommandGrantsSecureSettingsAndTrustsRelayKey() {
+        val command = AdbBridgeClient.buildBootstrapCommand("ADB_PUBLIC_KEY rokid-relay@phone")
+
+        assertTrue(command.contains("pm grant ${Constants.CLIENT_PACKAGE} android.permission.WRITE_SECURE_SETTINGS"))
+        assertTrue(command.contains("settings put global adb_wifi_enabled 1"))
+        assertTrue(command.contains("setprop persist.adb.tcp.port 5555"))
+        assertTrue(command.contains("/data/misc/adb/adb_keys"))
+        assertTrue(command.contains("grep -qxF"))
     }
 }

@@ -46,6 +46,7 @@ class MainActivity : Activity() {
     private lateinit var updateController: PhoneUpdateController
     private lateinit var setupRows: LinearLayout
     private lateinit var noticeText: TextView
+    private lateinit var selfArmPairingCodeInput: EditText
     private lateinit var notificationForwardingSummary: TextView
     private lateinit var pauseForwardingWhenScreenOnCheckBox: CheckBox
     private lateinit var notificationImagePreviewsCheckBox: CheckBox
@@ -636,6 +637,41 @@ class MainActivity : Activity() {
             addView(smallButton(actionLabel, actionTone, onClick), LinearLayout.LayoutParams(dp(112), dp(38)))
         }
 
+    private fun selfArmPairingCodeRow(): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            val savedCode = if (::selfArmPairingCodeInput.isInitialized) {
+                selfArmPairingCodeInput.text.toString()
+            } else {
+                ""
+            }
+            selfArmPairingCodeInput = EditText(this@MainActivity).apply {
+                hint = "Pairing code"
+                setText(savedCode)
+                inputType = InputType.TYPE_CLASS_NUMBER
+                imeOptions = EditorInfo.IME_ACTION_DONE
+                maxLines = 1
+                setSingleLine(true)
+                textSize = 13f
+                setTextColor(COLOR_TEXT)
+                setHintTextColor(COLOR_DIM)
+                background = inputBackground()
+                setPadding(dp(12), 0, dp(12), 0)
+            }
+            addView(selfArmPairingCodeInput, LinearLayout.LayoutParams(0, dp(42), 1f))
+            addView(smallButton("Pair", ButtonTone.Primary) {
+                val accepted = RelayBridge.submitSelfArmPairingCode(
+                    this@MainActivity,
+                    selfArmPairingCodeInput.text.toString(),
+                )
+                toastLine(if (accepted) "Pairing with Wireless Debugging" else "Enter the 6-digit code")
+                renderStatus()
+            }, LinearLayout.LayoutParams(dp(82), dp(42)).apply {
+                leftMargin = dp(8)
+            })
+        }
+
     private fun modeSelector(): LinearLayout =
         LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1148,22 +1184,26 @@ class MainActivity : Activity() {
             val relayNotificationAccessMissing = relayEnabled && !notifications
             val selfArmProvisioned = SelfArmProvisioner.provisioned(this)
             val selfArmDisablePending = SelfArmProvisioner.disablePending(this)
+            val selfArmWireless = SelfArmProvisioner.wirelessBootstrap(this)
             setupRows.addView(setupRow(
                 title = "Self-arm recovery",
                 value = when {
                     selfArmDisablePending -> "Disable pending"
                     selfArmProvisioned -> "Recovery armed"
-                    relayEnabled -> "Waiting for glasses link"
+                    selfArmWireless.complete -> "Wireless bootstrap ready"
+                    selfArmWireless.inProgress -> selfArmWireless.status.ifBlank { "Wireless bootstrap running" }
+                    relayEnabled -> "Needs Wireless Debugging bootstrap"
                     else -> "Off"
                 },
                 tone = when {
-                    selfArmProvisioned -> StatusTone.Ready
-                    relayEnabled || selfArmDisablePending -> StatusTone.Waiting
+                    selfArmProvisioned || selfArmWireless.complete -> StatusTone.Ready
+                    relayEnabled || selfArmDisablePending || selfArmWireless.inProgress -> StatusTone.Waiting
                     else -> StatusTone.Neutral
                 },
                 actionLabel = when {
                     selfArmProvisioned -> "Re-arm"
-                    relayEnabled -> "Retry"
+                    selfArmWireless.complete -> "Arm"
+                    relayEnabled -> "Bootstrap"
                     else -> "Arm"
                 },
                 actionTone = ButtonTone.Secondary,
@@ -1172,6 +1212,13 @@ class MainActivity : Activity() {
                     renderStatus()
                 },
             ), matchWrap(top = 8))
+            if (
+                !selfArmProvisioned &&
+                !selfArmWireless.complete &&
+                (relayEnabled || selfArmWireless.inProgress || snap.selfArmWirelessInProgress)
+            ) {
+                setupRows.addView(selfArmPairingCodeRow(), matchWrap(top = 8))
+            }
             setupRows.addView(setupRow(
                 title = "Relay service",
                 value = when {
@@ -1231,6 +1278,8 @@ class MainActivity : Activity() {
                     "Operational. Phone bridge and glasses app are ready."
                 RelayService.running -> "Awake. Relay will sleep again after the reply window."
                 SelfArmProvisioner.provisioned(this) -> "Armed. Self-arm provisioned for glasses recovery."
+                SelfArmProvisioner.wirelessBootstrapped(this) ->
+                    "Wireless bootstrap is complete. Start Self-arm recovery once to arm direct repair."
                 RelayStarter.isRelayEnabled(this) -> "Armed. Relay wakes on replyable notifications or inbox reply attempts."
                 else -> "Ready to arm wake-on-notification."
             }
@@ -2041,6 +2090,9 @@ class MainActivity : Activity() {
         CompanionDeviceCoordinator.startObserving(this)
         BleWakeServer.ensureStarted(this)
         RelayBridge.setStatus("Self-arm provisioning: opening glasses link")
+        if (!SelfArmProvisioner.wirelessBootstrapped(this)) {
+            RelayBridge.requestSelfArmWirelessBootstrap(this)
+        }
         lastSelfArmAutoPrepareAtMs = SystemClock.elapsedRealtime()
         Log.i(TAG_SELF_ARM, "self-arm provisioning link started")
         return true
@@ -2049,6 +2101,7 @@ class MainActivity : Activity() {
     private fun maybeAutoPrepareSelfArmRecovery() {
         if (!RelayStarter.isRelayEnabled(this)) return
         if (SelfArmProvisioner.provisioned(this) || SelfArmProvisioner.disablePending(this)) return
+        if (!SelfArmProvisioner.wirelessBootstrapped(this)) return
         if (savedAuthToken().isNullOrBlank()) return
         val now = SystemClock.elapsedRealtime()
         if (
