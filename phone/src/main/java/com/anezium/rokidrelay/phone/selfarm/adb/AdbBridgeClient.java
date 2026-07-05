@@ -9,7 +9,9 @@ import com.flyfishxu.kadb.Kadb;
 import java.io.File;
 import java.io.IOException;
 import java.net.Inet4Address;
+import java.net.InetSocketAddress;
 import java.net.NetworkInterface;
+import java.net.Socket;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.concurrent.CountDownLatch;
@@ -24,8 +26,9 @@ import kotlinx.coroutines.BuildersKt;
 import kotlinx.coroutines.CoroutineScope;
 
 public final class AdbBridgeClient {
-    private static final String TAG = "RelayAdbBridge";
+    private static final String TAG = "RelaySelfArmWireless";
     private static final long PAIRING_TIMEOUT_MS = 12000L;
+    private static final int REACHABILITY_TIMEOUT_MS = 2500;
     private static final int DEFAULT_ADB_PORT = 5555;
     private static volatile boolean kadbCertConfigured;
 
@@ -76,16 +79,19 @@ public final class AdbBridgeClient {
     }
 
     public AdbSession connect(String host, int port) throws IOException {
-        ensurePhoneWifiReachable(host);
+        ensurePhoneCanReachGlasses(host, port, "connect");
         if (port != DEFAULT_ADB_PORT) {
             Throwable kadbError = null;
             try {
+                Log.i(TAG, "connect KADB start host=" + redactHost(host) + " port=" + port);
                 configureKadbCert();
                 return KadbSession.connect(host, port);
             } catch (Throwable throwable) {
                 kadbError = throwable;
+                Log.e(TAG, "connect KADB failed host=" + redactHost(host) + " port=" + port, throwable);
             }
             try {
+                Log.i(TAG, "connect DADB fallback start host=" + redactHost(host) + " port=" + port);
                 return DadbSession.connect(host, port, readOrCreateDadbKeyPair());
             } catch (Throwable dadbError) {
                 IOException failure = new IOException(
@@ -98,6 +104,7 @@ public final class AdbBridgeClient {
                 throw failure;
             }
         }
+        Log.i(TAG, "connect DADB start host=" + redactHost(host) + " port=" + port);
         return DadbSession.connect(host, port, readOrCreateDadbKeyPair());
     }
 
@@ -105,11 +112,13 @@ public final class AdbBridgeClient {
         if (host == null || host.trim().isEmpty() || code == null || code.trim().isEmpty() || port <= 0) {
             throw new IOException("Wireless Debugging pairing details are incomplete");
         }
-        ensurePhoneWifiReachable(host);
+        ensurePhoneCanReachGlasses(host, port, "pairing");
+        Log.i(TAG, "pair KADB cert configure start host=" + redactHost(host) + " port=" + port);
         configureKadbCert();
+        Log.i(TAG, "pair KADB cert configure success host=" + redactHost(host) + " port=" + port);
         String cleanHost = host.trim();
         String cleanCode = code.trim();
-        Log.d(TAG, "pair start host=" + redactHost(cleanHost)
+        Log.i(TAG, "pair start host=" + redactHost(cleanHost)
                 + " port=" + port
                 + " codeLen=" + cleanCode.length());
         CountDownLatch done = new CountDownLatch(1);
@@ -147,7 +156,7 @@ public final class AdbBridgeClient {
         if (cause != null) {
             throw new IOException("Wireless Debugging pairing failed: " + shortMessage(cause), cause);
         }
-        Log.d(TAG, "pair success host=" + redactHost(cleanHost) + " port=" + port);
+        Log.i(TAG, "pair success host=" + redactHost(cleanHost) + " port=" + port);
     }
 
     private void runKadbPair(String host, int port, String code) throws InterruptedException {
@@ -163,24 +172,21 @@ public final class AdbBridgeClient {
     }
 
     public static String buildBootstrapCommand(String adbPublicKey) {
-        String quotedPublicKey = shellQuote(adbPublicKey.trim());
-        return "set -e\n"
-                + "PUB=" + quotedPublicKey + "\n"
-                + "pm grant " + Constants.CLIENT_PACKAGE
-                + " android.permission.WRITE_SECURE_SETTINGS\n"
-                + "settings put global adb_wifi_enabled 1\n"
-                + "setprop persist.adb.tcp.port " + DEFAULT_ADB_PORT + "\n"
-                + "setprop service.adb.tcp.port " + DEFAULT_ADB_PORT + " >/dev/null 2>&1 || true\n"
-                + "mkdir -p /data/misc/adb\n"
-                + "touch /data/misc/adb/adb_keys\n"
-                + "grep -qxF \"$PUB\" /data/misc/adb/adb_keys 2>/dev/null "
-                + "|| printf '%s\\n' \"$PUB\" >> /data/misc/adb/adb_keys\n"
-                + "chmod 640 /data/misc/adb/adb_keys 2>/dev/null || true\n"
+        // Granting WRITE_SECURE_SETTINGS is the whole point: it enables the app-side accessibility
+        // self-repair with no further ADB, so we never need to reconnect. We deliberately do NOT
+        // persist an adbd port, trust the key (/data/misc/adb is root/SELinux-owned and unwritable
+        // from the shell uid anyway), or restart adbd — any of those would drop this very Wireless
+        // Debugging session before we can read the result (observed as an EOFException mid-read).
+        // adbPublicKey is kept only for call-site compatibility. No `set -e`; fail only if the
+        // grant did not take.
+        return "pm grant " + Constants.CLIENT_PACKAGE
+                + " android.permission.WRITE_SECURE_SETTINGS 2>/dev/null || true\n"
+                + "settings put global adb_wifi_enabled 1 2>/dev/null || true\n"
                 + "GRANTED=$(dumpsys package " + Constants.CLIENT_PACKAGE
                 + " 2>/dev/null | grep -A3 android.permission.WRITE_SECURE_SETTINGS "
-                + "| grep -c 'granted=true' || true)\n"
+                + "| grep -c 'granted=true')\n"
                 + "echo ROKID_RELAY_WIRELESS_BOOTSTRAP grant=$GRANTED port=$(getprop persist.adb.tcp.port)\n"
-                + "(setprop ctl.restart adbd >/dev/null 2>&1 || true) &\n";
+                + "[ \"$GRANTED\" != \"0\" ] || exit 1\n";
     }
 
     private synchronized void configureKadbCert() {
@@ -190,7 +196,9 @@ public final class AdbBridgeClient {
         File privateKey = kadbPrivateKeyFile();
         File dir = privateKey.getParentFile();
         if (dir != null && !dir.isDirectory()) {
-            dir.mkdirs();
+            if (!dir.mkdirs() && !dir.isDirectory()) {
+                throw new IllegalStateException("Could not create KADB key directory");
+            }
         }
         com.flyfishxu.kadb.cert.KadbCert.INSTANCE.configure(
                 new com.flyfishxu.kadb.cert.OkioFilePrivateKeyStore(
@@ -209,24 +217,53 @@ public final class AdbBridgeClient {
         File dir = new File(context.getFilesDir(), "adb");
         File privateKey = new File(dir, "adbkey");
         File publicKey = new File(dir, "adbkey.pub");
+        if (!dir.isDirectory() && !dir.mkdirs() && !dir.isDirectory()) {
+            throw new IllegalStateException("Could not create DADB key directory");
+        }
         if (!privateKey.isFile()) {
             AdbKeyPair.generate(privateKey, publicKey);
         }
         return AdbKeyPair.read(privateKey, publicKey);
     }
 
-    private void ensurePhoneWifiReachable(String host) throws IOException {
-        if (host == null || host.trim().isEmpty() || !isPrivateLanAddress(host.trim())) {
+    private void ensurePhoneCanReachGlasses(String host, int port, String label) throws IOException {
+        String cleanHost = host == null ? "" : host.trim();
+        String phoneIp = ensurePhoneWifiReachable(cleanHost);
+        if (cleanHost.isEmpty() || port <= 0) {
             return;
+        }
+        Log.i(TAG, "reachability check start label=" + label
+                + " phone=" + redactHost(phoneIp)
+                + " glasses=" + redactHost(cleanHost)
+                + " port=" + port
+                + " timeoutMs=" + REACHABILITY_TIMEOUT_MS);
+        try (Socket socket = new Socket()) {
+            socket.connect(new InetSocketAddress(cleanHost, port), REACHABILITY_TIMEOUT_MS);
+            Log.i(TAG, "reachability check success label=" + label
+                    + " glasses=" + redactHost(cleanHost)
+                    + " port=" + port);
+        } catch (IOException exception) {
+            throw new IOException(
+                    "Phone and glasses must be on the same Wi-Fi. Could not reach glasses Wireless Debugging "
+                            + label + " endpoint at " + redactHost(cleanHost) + ":" + port
+                            + " within " + REACHABILITY_TIMEOUT_MS + "ms.",
+                    exception);
+        }
+    }
+
+    private String ensurePhoneWifiReachable(String host) throws IOException {
+        if (host == null || host.trim().isEmpty() || !isPrivateLanAddress(host.trim())) {
+            return "";
         }
         String phoneIp = phoneWifiIpv4();
         if (phoneIp.isEmpty()) {
-            throw new IOException("Phone Wi-Fi is not connected. Connect this phone to the same Wi-Fi or hotspot as the glasses, then retry.");
+            throw new IOException("Phone and glasses must be on the same Wi-Fi. Phone Wi-Fi is not connected.");
         }
         if (!sameIpv4Slash24(phoneIp, host.trim())) {
-            Log.d(TAG, "phone/glasses Wi-Fi subnet differs phone=" + redactHost(phoneIp)
+            Log.i(TAG, "phone/glasses Wi-Fi subnet differs phone=" + redactHost(phoneIp)
                     + " glasses=" + redactHost(host));
         }
+        return phoneIp;
     }
 
     private String phoneWifiIpv4() {

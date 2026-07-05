@@ -112,16 +112,50 @@ class SelfArmProvisionerTest {
         assertFalse(SelfArmProvisioner.provisioned(context))
         assertEquals("192.168.1.84", state.host)
         assertEquals(33093, state.connectPort)
+        assertEquals("", state.lastError)
     }
 
     @Test
-    fun wirelessBootstrapCommandGrantsSecureSettingsAndTrustsRelayKey() {
+    fun wirelessBootstrapErrorSurvivesLaterGlassesStatusUntilSuccess() {
+        val context = RuntimeEnvironment.getApplication() as Context
+
+        SelfArmProvisioner.markWirelessBootstrapFailed(
+            context,
+            status = "Wireless ADB bootstrap failed: KADB configure failed",
+            error = "KADB configure failed",
+        )
+        SelfArmProvisioner.markWirelessBootstrapRequested(context, "wireless setup timeout")
+        var state = SelfArmProvisioner.wirelessBootstrap(context)
+
+        assertEquals("wireless setup timeout", state.status)
+        assertEquals("KADB configure failed", state.lastError)
+
+        SelfArmProvisioner.markWirelessBootstrapComplete(context, "192.168.1.84", 33093)
+        state = SelfArmProvisioner.wirelessBootstrap(context)
+
+        assertEquals("", state.lastError)
+    }
+
+    @Test
+    fun wirelessBootstrapCommandGrantsSecureSettingsAndFailsOnlyIfNotGranted() {
         val command = AdbBridgeClient.buildBootstrapCommand("ADB_PUBLIC_KEY rokid-relay@phone")
 
         assertTrue(command.contains("pm grant ${Constants.CLIENT_PACKAGE} android.permission.WRITE_SECURE_SETTINGS"))
         assertTrue(command.contains("settings put global adb_wifi_enabled 1"))
-        assertTrue(command.contains("setprop persist.adb.tcp.port 5555"))
-        assertTrue(command.contains("/data/misc/adb/adb_keys"))
-        assertTrue(command.contains("grep -qxF"))
+        assertTrue(command.contains("echo ROKID_RELAY_WIRELESS_BOOTSTRAP grant="))
+        assertTrue(command.contains("exit 1"))
+    }
+
+    @Test
+    fun wirelessBootstrapCommandNeverDisruptsTheWirelessDebuggingSession() {
+        // Restarting adbd or re-persisting its port drops the very Wireless Debugging session we
+        // are running the command over, so the phone never reads the result. Trusting the key is
+        // impossible from the shell uid. None of these must appear in the command.
+        val command = AdbBridgeClient.buildBootstrapCommand("ADB_PUBLIC_KEY rokid-relay@phone")
+
+        assertFalse(command.contains("ctl.restart adbd"))
+        assertFalse(command.contains("setprop persist.adb.tcp.port"))
+        assertFalse(command.contains("/data/misc/adb/adb_keys"))
+        assertFalse(command.contains("set -e"))
     }
 }

@@ -12,6 +12,7 @@ object SelfArmProvisioner {
     private const val PREF_WIRELESS_BOOTSTRAP_HOST = "self_arm_wireless_bootstrap_host"
     private const val PREF_WIRELESS_BOOTSTRAP_PAIR_PORT = "self_arm_wireless_bootstrap_pair_port"
     private const val PREF_WIRELESS_BOOTSTRAP_CONNECT_PORT = "self_arm_wireless_bootstrap_connect_port"
+    private const val PREF_WIRELESS_BOOTSTRAP_LAST_ERROR = "self_arm_wireless_bootstrap_last_error"
 
     data class Provision(
         val json: JSONObject,
@@ -25,6 +26,7 @@ object SelfArmProvisioner {
         val host: String,
         val pairPort: Int,
         val connectPort: Int,
+        val lastError: String,
     )
 
     fun buildProvision(context: Context): Provision {
@@ -142,15 +144,17 @@ object SelfArmProvisioner {
             .putString(PREF_WIRELESS_BOOTSTRAP_STATUS, status)
             .putString(PREF_WIRELESS_BOOTSTRAP_HOST, host)
             .putInt(PREF_WIRELESS_BOOTSTRAP_CONNECT_PORT, connectPort)
+            .remove(PREF_WIRELESS_BOOTSTRAP_LAST_ERROR)
             .apply()
     }
 
-    fun markWirelessBootstrapFailed(context: Context, status: String) {
+    fun markWirelessBootstrapFailed(context: Context, status: String, error: String = status) {
         context.applicationContext
             .getSharedPreferences(Constants.PREFS, Context.MODE_PRIVATE)
             .edit()
             .putBoolean(PREF_WIRELESS_BOOTSTRAP_IN_PROGRESS, false)
             .putString(PREF_WIRELESS_BOOTSTRAP_STATUS, status)
+            .putString(PREF_WIRELESS_BOOTSTRAP_LAST_ERROR, error)
             .apply()
     }
 
@@ -174,6 +178,7 @@ object SelfArmProvisioner {
             host = prefs.getString(PREF_WIRELESS_BOOTSTRAP_HOST, "").orEmpty(),
             pairPort = prefs.getInt(PREF_WIRELESS_BOOTSTRAP_PAIR_PORT, 0),
             connectPort = prefs.getInt(PREF_WIRELESS_BOOTSTRAP_CONNECT_PORT, 0),
+            lastError = prefs.getString(PREF_WIRELESS_BOOTSTRAP_LAST_ERROR, "").orEmpty(),
         )
     }
 

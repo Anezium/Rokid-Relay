@@ -13,6 +13,7 @@ import com.anezium.rokidrelay.phone.selfarm.adb.AdbBridgeClient
 import com.rokid.cxr.Caps
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.TimeoutException
 
 object RelayBridge {
     data class Snapshot(
@@ -38,11 +39,22 @@ object RelayBridge {
         val bootstrapReadyForMessages: Boolean,
     )
 
+    private data class PendingWirelessBootstrap(
+        val token: String,
+        val code: String,
+        val host: String,
+        val pairPort: Int,
+        val connectPort: Int,
+        val source: String,
+    )
+
     private const val TAG = "RokidRelayBridge"
+    private const val WIRELESS_TAG = "RelaySelfArmWireless"
     private const val RECONNECT_INITIAL_DELAY_MS = 1_000L
     private const val RECONNECT_MAX_DELAY_MS = 120_000L
     private const val FOREGROUND_OPEN_WINDOW_MS = 30_000L
     private const val SELF_ARM_DISABLE_ACK_TIMEOUT_MS = 12_000L
+    private const val SELF_ARM_WIRELESS_BOOTSTRAP_TIMEOUT_MS = 90_000L
     private val main = Handler(Looper.getMainLooper())
     private val disableWaitLock = Any()
 
@@ -71,6 +83,12 @@ object RelayBridge {
     @Volatile private var selfArmWirelessSetupRequested = false
     @Volatile private var selfArmWirelessBootstrapRunning = false
     @Volatile private var lastSelfArmPairingToken = ""
+    @Volatile private var activeSelfArmPairingToken = ""
+    @Volatile private var activeSelfArmWirelessBootstrapAttemptId = 0L
+    @Volatile private var nextSelfArmWirelessBootstrapAttemptId = 0L
+    @Volatile private var selfArmWirelessBootstrapThread: Thread? = null
+    @Volatile private var selfArmWirelessBootstrapWatchdog: Runnable? = null
+    @Volatile private var pendingSelfArmWirelessBootstrap: PendingWirelessBootstrap? = null
     @Volatile private var bootstrapStarted = false
     @Volatile private var bootstrapInFlight = false
     @Volatile private var bootstrapReadyForMessages = false
@@ -219,8 +237,10 @@ object RelayBridge {
         val host = selfArmWirelessPairHost.ifBlank { saved.host }
         val pairPort = selfArmWirelessPairPort.takeIf { it > 0 } ?: saved.pairPort
         val connectPort = selfArmWirelessConnectPort.takeIf { it > 0 } ?: saved.connectPort
+        val token = listOf(host, pairPort.toString(), connectPort.toString(), cleanCode).joinToString(":")
         startSelfArmWirelessBootstrap(
             context = context.applicationContext,
+            token = token,
             code = cleanCode,
             host = host,
             pairPort = pairPort,
@@ -819,7 +839,15 @@ object RelayBridge {
         val code = json.optString("adbPairCode").filter { it.isDigit() }
         val pairPort = json.optInt("adbPairPort", 0)
         val connectPort = json.optInt("adbConnectPort", json.optInt("adbPort", 0))
-        selfArmWirelessStatus = status.replace('_', ' ')
+        Log.i(
+            WIRELESS_TAG,
+            "status received setupState=${status.ifBlank { "blank" }} codeLen=${code.length} " +
+                "host=$host pairPort=$pairPort connectPort=$connectPort",
+        )
+        val incomingStatus = status.replace('_', ' ')
+        if (!(selfArmWirelessBootstrapRunning && code.length == 6)) {
+            selfArmWirelessStatus = incomingStatus
+        }
         selfArmWirelessInProgress = true
         if (host.isNotBlank()) selfArmWirelessPairHost = host
         if (pairPort > 0) selfArmWirelessPairPort = pairPort
@@ -827,13 +855,29 @@ object RelayBridge {
         selfArmStatus = selfArmWirelessStatus
         lastStatus = selfArmStatus
         if (code.length == 6) {
+            if (selfArmWirelessBootstrapped || SelfArmProvisioner.wirelessBootstrapped(context)) {
+                // The glasses keep resending the pairing code for the life of the dialog; once the
+                // bootstrap has already completed, ignore the tail so we don't re-mark the state
+                // as in-progress or attempt to re-pair a now-closed pairing port.
+                Log.i(WIRELESS_TAG, "status code branch ignored: wireless bootstrap already complete")
+                return
+            }
+            Log.i(
+                WIRELESS_TAG,
+                "status code branch codeLen=${code.length} host=$selfArmWirelessPairHost " +
+                    "pairPort=$selfArmWirelessPairPort connectPort=$selfArmWirelessConnectPort",
+            )
             selfArmWirelessPairingCode = code
             SelfArmProvisioner.markWirelessPairingDiscovered(
                 context = context,
                 host = selfArmWirelessPairHost,
                 pairPort = selfArmWirelessPairPort,
                 connectPort = selfArmWirelessConnectPort,
-                status = "Pairing code read from glasses",
+                status = if (selfArmWirelessBootstrapRunning) {
+                    selfArmWirelessStatus
+                } else {
+                    "Pairing code read from glasses"
+                },
             )
             val token = listOf(
                 selfArmWirelessPairHost,
@@ -841,16 +885,48 @@ object RelayBridge {
                 selfArmWirelessConnectPort.toString(),
                 code,
             ).joinToString(":")
-            if (token != lastSelfArmPairingToken) {
-                lastSelfArmPairingToken = token
-                startSelfArmWirelessBootstrap(
-                    context = context,
-                    code = code,
-                    host = selfArmWirelessPairHost,
-                    pairPort = selfArmWirelessPairPort,
-                    connectPort = selfArmWirelessConnectPort,
-                    source = "glasses",
-                )
+            val running = selfArmWirelessBootstrapRunning
+            val activeToken = activeSelfArmPairingToken
+            val tokenChanged = token != lastSelfArmPairingToken
+            val activeTokenChanged = token != activeToken
+            val alreadyComplete = selfArmWirelessBootstrapped || SelfArmProvisioner.wirelessBootstrapped(context)
+            val decision = when {
+                alreadyComplete -> "skip_complete"
+                running && !activeTokenChanged -> "skip_same_token_running"
+                running -> "queue_superseding_token"
+                else -> "start"
+            }
+            Log.i(
+                WIRELESS_TAG,
+                "token decision=$decision tokenChanged=$tokenChanged running=$running " +
+                    "activeTokenChanged=$activeTokenChanged host=$selfArmWirelessPairHost " +
+                    "pairPort=$selfArmWirelessPairPort connectPort=$selfArmWirelessConnectPort codeLen=${code.length}",
+            )
+            when (decision) {
+                "skip_complete" -> Unit
+                "skip_same_token_running" -> Unit
+                "queue_superseding_token" -> {
+                    pendingSelfArmWirelessBootstrap = PendingWirelessBootstrap(
+                        token = token,
+                        code = code,
+                        host = selfArmWirelessPairHost,
+                        pairPort = selfArmWirelessPairPort,
+                        connectPort = selfArmWirelessConnectPort,
+                        source = "glasses",
+                    )
+                    selfArmWirelessBootstrapThread?.interrupt()
+                }
+                else -> {
+                    startSelfArmWirelessBootstrap(
+                        context = context,
+                        token = token,
+                        code = code,
+                        host = selfArmWirelessPairHost,
+                        pairPort = selfArmWirelessPairPort,
+                        connectPort = selfArmWirelessConnectPort,
+                        source = "glasses",
+                    )
+                }
             }
         } else if (host.isNotBlank() || pairPort > 0 || connectPort > 0) {
             SelfArmProvisioner.markWirelessPairingDiscovered(
@@ -867,17 +943,38 @@ object RelayBridge {
 
     private fun startSelfArmWirelessBootstrap(
         context: Context,
+        token: String,
         code: String,
         host: String,
         pairPort: Int,
         connectPort: Int,
         source: String,
     ) {
-        if (selfArmWirelessBootstrapRunning) {
+        val runningAtEntry = selfArmWirelessBootstrapRunning
+        Log.i(
+            WIRELESS_TAG,
+            "bootstrap start requested running=$runningAtEntry source=$source host=$host " +
+                "pairPort=$pairPort connectPort=$connectPort codeLen=${code.length}",
+        )
+        if (runningAtEntry) {
             selfArmWirelessStatus = "Wireless ADB bootstrap already running"
             lastStatus = selfArmWirelessStatus
+            pendingSelfArmWirelessBootstrap = PendingWirelessBootstrap(
+                token = token,
+                code = code,
+                host = host,
+                pairPort = pairPort,
+                connectPort = connectPort,
+                source = source,
+            )
+            Log.i(WIRELESS_TAG, "bootstrap start deferred because another attempt is running")
             return
         }
+        lastSelfArmPairingToken = token
+        activeSelfArmPairingToken = token
+        val attemptId = nextSelfArmWirelessBootstrapAttemptId + 1L
+        nextSelfArmWirelessBootstrapAttemptId = attemptId
+        activeSelfArmWirelessBootstrapAttemptId = attemptId
         selfArmWirelessBootstrapRunning = true
         selfArmWirelessInProgress = true
         selfArmWirelessStatus = "Pairing Wireless Debugging"
@@ -890,10 +987,32 @@ object RelayBridge {
             connectPort = connectPort,
             status = selfArmWirelessStatus,
         )
-        Thread {
+        val watchdog = Runnable {
+            val timeout = TimeoutException(
+                "Wireless ADB bootstrap timed out after ${SELF_ARM_WIRELESS_BOOTSTRAP_TIMEOUT_MS}ms",
+            )
+            Log.e(WIRELESS_TAG, "bootstrap watchdog timed out attempt=$attemptId", timeout)
+            selfArmWirelessBootstrapThread?.interrupt()
+            finishSelfArmWirelessBootstrap(context, attemptId, token, Result.failure(timeout))
+        }
+        selfArmWirelessBootstrapWatchdog?.let { main.removeCallbacks(it) }
+        selfArmWirelessBootstrapWatchdog = watchdog
+        main.postDelayed(watchdog, SELF_ARM_WIRELESS_BOOTSTRAP_TIMEOUT_MS)
+        val worker = Thread {
+            Log.i(WIRELESS_TAG, "worker started attempt=$attemptId")
             val result = runCatching {
+                Log.i(WIRELESS_TAG, "ensure public key start attempt=$attemptId")
                 val publicKey = SelfArmProvisioner.ensureWirelessBootstrapPublicKey(context)
-                AdbBridgeClient(context).bootstrapWirelessDebugging(
+                Log.i(WIRELESS_TAG, "ensure public key success attempt=$attemptId pubkeyLen=${publicKey.length}")
+                Log.i(WIRELESS_TAG, "AdbBridgeClient construction start attempt=$attemptId")
+                val adbClient = AdbBridgeClient(context)
+                Log.i(WIRELESS_TAG, "AdbBridgeClient construction success attempt=$attemptId")
+                Log.i(
+                    WIRELESS_TAG,
+                    "bootstrapWirelessDebugging start attempt=$attemptId host=$host " +
+                        "pairPort=$pairPort connectPort=$connectPort codeLen=${code.length} pubkeyLen=${publicKey.length}",
+                )
+                adbClient.bootstrapWirelessDebugging(
                     host,
                     pairPort,
                     code,
@@ -901,36 +1020,109 @@ object RelayBridge {
                     publicKey,
                 )
             }
+            result.onSuccess {
+                Log.i(
+                    WIRELESS_TAG,
+                    "worker bootstrapWirelessDebugging success attempt=$attemptId " +
+                        "connectHost=${it.connectHost} connectPort=${it.connectPort}",
+                )
+            }.onFailure {
+                Log.e(WIRELESS_TAG, "worker bootstrapWirelessDebugging failed attempt=$attemptId", it)
+            }
             main.post {
-                selfArmWirelessBootstrapRunning = false
-                result.onSuccess { bootstrap ->
-                    selfArmWirelessBootstrapped = true
-                    selfArmWirelessInProgress = false
-                    selfArmWirelessPairingCode = ""
-                    selfArmWirelessPairHost = bootstrap.connectHost
-                    selfArmWirelessConnectPort = bootstrap.connectPort
-                    SelfArmProvisioner.markWirelessBootstrapComplete(
-                        context = context,
-                        host = bootstrap.connectHost,
-                        connectPort = bootstrap.connectPort,
-                    )
-                    selfArmWirelessStatus = "Wireless ADB bootstrap complete"
-                    selfArmStatus = selfArmWirelessStatus
-                    lastStatus = selfArmStatus
-                    provisionSelfArmIfArmed()
-                }.onFailure { failure ->
-                    selfArmWirelessInProgress = false
-                    selfArmWirelessStatus = "Wireless ADB bootstrap failed: ${failure.message.orEmpty().ifBlank { failure::class.java.simpleName }}"
-                    selfArmStatus = selfArmWirelessStatus
-                    lastStatus = selfArmStatus
-                    SelfArmProvisioner.markWirelessBootstrapFailed(context, selfArmWirelessStatus)
-                }
+                finishSelfArmWirelessBootstrap(context, attemptId, token, result)
             }
         }.apply {
             name = "RokidRelayWirelessSelfArm"
-            start()
+        }
+        selfArmWirelessBootstrapThread = worker
+        try {
+            worker.start()
+        } catch (failure: Throwable) {
+            Log.e(WIRELESS_TAG, "worker start failed attempt=$attemptId", failure)
+            finishSelfArmWirelessBootstrap(context, attemptId, token, Result.failure(failure))
         }
     }
+
+    private fun finishSelfArmWirelessBootstrap(
+        context: Context,
+        attemptId: Long,
+        token: String,
+        result: Result<AdbBridgeClient.BootstrapResult>,
+    ) {
+        if (attemptId != activeSelfArmWirelessBootstrapAttemptId || token != activeSelfArmPairingToken) {
+            Log.i(
+                WIRELESS_TAG,
+                "terminal ignored for stale attempt=$attemptId activeAttempt=$activeSelfArmWirelessBootstrapAttemptId",
+            )
+            return
+        }
+        selfArmWirelessBootstrapWatchdog?.let { main.removeCallbacks(it) }
+        selfArmWirelessBootstrapWatchdog = null
+        selfArmWirelessBootstrapRunning = false
+        selfArmWirelessBootstrapThread = null
+        activeSelfArmWirelessBootstrapAttemptId = 0L
+        activeSelfArmPairingToken = ""
+        result.onSuccess { bootstrap ->
+            val bootstrapMarker = bootstrap.output
+                .lineSequence()
+                .firstOrNull { it.contains("ROKID_RELAY_WIRELESS_BOOTSTRAP") }
+                .orEmpty()
+            Log.i(
+                WIRELESS_TAG,
+                "bootstrap terminal success attempt=$attemptId connectHost=${bootstrap.connectHost} " +
+                    "connectPort=${bootstrap.connectPort} output=${bootstrapMarker.ifBlank { "no-marker" }}",
+            )
+            selfArmWirelessBootstrapped = true
+            selfArmWirelessInProgress = false
+            selfArmWirelessPairingCode = ""
+            selfArmWirelessPairHost = bootstrap.connectHost
+            selfArmWirelessConnectPort = bootstrap.connectPort
+            pendingSelfArmWirelessBootstrap = null
+            SelfArmProvisioner.markWirelessBootstrapComplete(
+                context = context,
+                host = bootstrap.connectHost,
+                connectPort = bootstrap.connectPort,
+            )
+            selfArmWirelessStatus = "Wireless ADB bootstrap complete"
+            selfArmStatus = selfArmWirelessStatus
+            lastStatus = selfArmStatus
+            provisionSelfArmIfArmed()
+        }.onFailure { failure ->
+            Log.e(WIRELESS_TAG, "bootstrap terminal failure attempt=$attemptId", failure)
+            selfArmWirelessInProgress = false
+            selfArmWirelessStatus = "Wireless ADB bootstrap failed: ${failure.readableSelfArmMessage()}"
+            selfArmStatus = selfArmWirelessStatus
+            lastStatus = selfArmStatus
+            SelfArmProvisioner.markWirelessBootstrapFailed(
+                context = context,
+                status = selfArmWirelessStatus,
+                error = failure.readableSelfArmMessage(),
+            )
+        }
+        val pending = pendingSelfArmWirelessBootstrap
+        if (pending != null && !selfArmWirelessBootstrapped) {
+            pendingSelfArmWirelessBootstrap = null
+            Log.i(
+                WIRELESS_TAG,
+                "starting pending bootstrap token after terminal attempt=$attemptId " +
+                    "host=${pending.host} pairPort=${pending.pairPort} connectPort=${pending.connectPort} " +
+                    "codeLen=${pending.code.length}",
+            )
+            startSelfArmWirelessBootstrap(
+                context = context,
+                token = pending.token,
+                code = pending.code,
+                host = pending.host,
+                pairPort = pending.pairPort,
+                connectPort = pending.connectPort,
+                source = pending.source,
+            )
+        }
+    }
+
+    private fun Throwable.readableSelfArmMessage(): String =
+        message.orEmpty().ifBlank { this::class.java.simpleName }
 
     private fun JSONObject.appendUserSettings(): JSONObject {
         val context = appContext

@@ -1191,13 +1191,17 @@ class MainActivity : Activity() {
                     selfArmDisablePending -> "Disable pending"
                     selfArmProvisioned -> "Recovery armed"
                     selfArmWireless.complete -> "Wireless bootstrap ready"
+                    selfArmWireless.lastError.isNotBlank() -> "Last bootstrap error: ${selfArmWireless.lastError}"
                     selfArmWireless.inProgress -> selfArmWireless.status.ifBlank { "Wireless bootstrap running" }
                     relayEnabled -> "Needs Wireless Debugging bootstrap"
                     else -> "Off"
                 },
                 tone = when {
                     selfArmProvisioned || selfArmWireless.complete -> StatusTone.Ready
-                    relayEnabled || selfArmDisablePending || selfArmWireless.inProgress -> StatusTone.Waiting
+                    relayEnabled ||
+                        selfArmDisablePending ||
+                        selfArmWireless.inProgress ||
+                        selfArmWireless.lastError.isNotBlank() -> StatusTone.Waiting
                     else -> StatusTone.Neutral
                 },
                 actionLabel = when {
