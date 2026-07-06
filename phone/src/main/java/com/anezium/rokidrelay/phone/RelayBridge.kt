@@ -55,6 +55,10 @@ object RelayBridge {
     private const val FOREGROUND_OPEN_WINDOW_MS = 30_000L
     private const val SELF_ARM_DISABLE_ACK_TIMEOUT_MS = 12_000L
     private const val SELF_ARM_WIRELESS_BOOTSTRAP_TIMEOUT_MS = 90_000L
+    private const val GLASSES_WIFI_REQUIRED_MESSAGE =
+        "Connect the glasses to a Wi-Fi network first (any network works — no internet needed), then tap Bootstrap."
+    private const val LEGACY_PHONE_WIFI_REQUIRED_MESSAGE =
+        "Connect this phone to Wi-Fi first — the same network as your glasses — then tap Bootstrap."
     private val main = Handler(Looper.getMainLooper())
     private val disableWaitLock = Any()
 
@@ -86,6 +90,7 @@ object RelayBridge {
     @Volatile private var activeSelfArmPairingToken = ""
     @Volatile private var activeSelfArmWirelessBootstrapAttemptId = 0L
     @Volatile private var nextSelfArmWirelessBootstrapAttemptId = 0L
+    @Volatile private var selfArmLocalSelfPairingInFlight = false
     @Volatile private var selfArmWirelessBootstrapThread: Thread? = null
     @Volatile private var selfArmWirelessBootstrapWatchdog: Runnable? = null
     @Volatile private var pendingSelfArmWirelessBootstrap: PendingWirelessBootstrap? = null
@@ -217,6 +222,7 @@ object RelayBridge {
         }
         selfArmWirelessSetupRequested = true
         selfArmWirelessInProgress = true
+        selfArmLocalSelfPairingInFlight = false
         selfArmWirelessStatus = "Opening Wireless Debugging on glasses"
         selfArmStatus = selfArmWirelessStatus
         lastStatus = selfArmWirelessStatus
@@ -844,6 +850,24 @@ object RelayBridge {
             "status received setupState=${status.ifBlank { "blank" }} codeLen=${code.length} " +
                 "host=$host pairPort=$pairPort connectPort=$connectPort",
         )
+        if (glassesWifiUnavailable(status, json, host)) {
+            Log.w(WIRELESS_TAG, "glasses Wi-Fi unavailable status=$status host=$host")
+            selfArmLocalSelfPairingInFlight = false
+            selfArmWirelessInProgress = false
+            selfArmWirelessStatus = GLASSES_WIFI_REQUIRED_MESSAGE
+            selfArmStatus = selfArmWirelessStatus
+            lastStatus = selfArmStatus
+            SelfArmProvisioner.markWirelessBootstrapFailed(
+                context = context,
+                status = GLASSES_WIFI_REQUIRED_MESSAGE,
+                error = GLASSES_WIFI_REQUIRED_MESSAGE,
+            )
+            return
+        }
+        when (status) {
+            "self_pairing_started" -> selfArmLocalSelfPairingInFlight = true
+            "self_pairing_failed" -> selfArmLocalSelfPairingInFlight = false
+        }
         val incomingStatus = status.replace('_', ' ')
         if (!(selfArmWirelessBootstrapRunning && code.length == 6)) {
             selfArmWirelessStatus = incomingStatus
@@ -854,6 +878,36 @@ object RelayBridge {
         if (connectPort > 0) selfArmWirelessConnectPort = connectPort
         selfArmStatus = selfArmWirelessStatus
         lastStatus = selfArmStatus
+        if (status == "wireless_bootstrap_complete") {
+            val completeHost = host.ifBlank { selfArmWirelessPairHost.ifBlank { "127.0.0.1" } }
+            val completePort = connectPort.takeIf { it > 0 } ?: selfArmWirelessConnectPort
+            Log.i(
+                WIRELESS_TAG,
+                "glasses reported wireless bootstrap complete host=$completeHost connectPort=$completePort",
+            )
+            selfArmWirelessBootstrapped = true
+            selfArmWirelessInProgress = false
+            selfArmLocalSelfPairingInFlight = false
+            selfArmWirelessBootstrapRunning = false
+            selfArmWirelessBootstrapWatchdog?.let { main.removeCallbacks(it) }
+            selfArmWirelessBootstrapWatchdog = null
+            selfArmWirelessBootstrapThread?.interrupt()
+            selfArmWirelessBootstrapThread = null
+            activeSelfArmWirelessBootstrapAttemptId = 0L
+            activeSelfArmPairingToken = ""
+            selfArmWirelessPairingCode = ""
+            pendingSelfArmWirelessBootstrap = null
+            SelfArmProvisioner.markWirelessBootstrapComplete(
+                context = context,
+                host = completeHost,
+                connectPort = completePort,
+            )
+            selfArmWirelessStatus = "Wireless ADB bootstrap complete"
+            selfArmStatus = selfArmWirelessStatus
+            lastStatus = selfArmStatus
+            provisionSelfArmIfArmed()
+            return
+        }
         if (code.length == 6) {
             if (selfArmWirelessBootstrapped || SelfArmProvisioner.wirelessBootstrapped(context)) {
                 // The glasses keep resending the pairing code for the life of the dialog; once the
@@ -890,8 +944,10 @@ object RelayBridge {
             val tokenChanged = token != lastSelfArmPairingToken
             val activeTokenChanged = token != activeToken
             val alreadyComplete = selfArmWirelessBootstrapped || SelfArmProvisioner.wirelessBootstrapped(context)
+            val waitingForLocalSelfPairing = selfArmLocalSelfPairingInFlight && status != "self_pairing_failed"
             val decision = when {
                 alreadyComplete -> "skip_complete"
+                waitingForLocalSelfPairing -> "wait_for_self_pairing"
                 running && !activeTokenChanged -> "skip_same_token_running"
                 running -> "queue_superseding_token"
                 else -> "start"
@@ -904,6 +960,12 @@ object RelayBridge {
             )
             when (decision) {
                 "skip_complete" -> Unit
+                "wait_for_self_pairing" -> {
+                    Log.i(
+                        WIRELESS_TAG,
+                        "phone LAN bootstrap suppressed while glasses self-pairing is in flight",
+                    )
+                }
                 "skip_same_token_running" -> Unit
                 "queue_superseding_token" -> {
                     pendingSelfArmWirelessBootstrap = PendingWirelessBootstrap(
@@ -941,6 +1003,14 @@ object RelayBridge {
         }
     }
 
+    private fun glassesWifiUnavailable(status: String, json: JSONObject, host: String): Boolean {
+        if (status == "wifi_enable_timeout" || status == "wifi_not_connected" || status == "wifi_unavailable") {
+            return true
+        }
+        val explicitlyDisconnected = json.has("wifiConnected") && !json.optBoolean("wifiConnected")
+        return explicitlyDisconnected && status == "wireless_setup_timeout" && host.isBlank()
+    }
+
     private fun startSelfArmWirelessBootstrap(
         context: Context,
         token: String,
@@ -956,6 +1026,19 @@ object RelayBridge {
             "bootstrap start requested running=$runningAtEntry source=$source host=$host " +
                 "pairPort=$pairPort connectPort=$connectPort codeLen=${code.length}",
         )
+        if (!SelfArmProvisioner.wirelessBootstrapped(context) && AdbBridgeClient.phoneWifiLanIpv4(context).isBlank()) {
+            Log.w(WIRELESS_TAG, "legacy LAN bootstrap blocked: phone has no Wi-Fi LAN IPv4")
+            selfArmWirelessInProgress = false
+            selfArmWirelessStatus = LEGACY_PHONE_WIFI_REQUIRED_MESSAGE
+            selfArmStatus = selfArmWirelessStatus
+            lastStatus = selfArmStatus
+            SelfArmProvisioner.markWirelessBootstrapFailed(
+                context = context,
+                status = LEGACY_PHONE_WIFI_REQUIRED_MESSAGE,
+                error = LEGACY_PHONE_WIFI_REQUIRED_MESSAGE,
+            )
+            return
+        }
         if (runningAtEntry) {
             selfArmWirelessStatus = "Wireless ADB bootstrap already running"
             lastStatus = selfArmWirelessStatus
@@ -1075,6 +1158,7 @@ object RelayBridge {
             )
             selfArmWirelessBootstrapped = true
             selfArmWirelessInProgress = false
+            selfArmLocalSelfPairingInFlight = false
             selfArmWirelessPairingCode = ""
             selfArmWirelessPairHost = bootstrap.connectHost
             selfArmWirelessConnectPort = bootstrap.connectPort
@@ -1091,6 +1175,7 @@ object RelayBridge {
         }.onFailure { failure ->
             Log.e(WIRELESS_TAG, "bootstrap terminal failure attempt=$attemptId", failure)
             selfArmWirelessInProgress = false
+            selfArmLocalSelfPairingInFlight = false
             selfArmWirelessStatus = "Wireless ADB bootstrap failed: ${failure.readableSelfArmMessage()}"
             selfArmStatus = selfArmWirelessStatus
             lastStatus = selfArmStatus

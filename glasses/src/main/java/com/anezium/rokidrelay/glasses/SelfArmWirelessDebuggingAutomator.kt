@@ -46,6 +46,13 @@ internal class SelfArmWirelessDebuggingAutomator(
     private var lastPairingHost = ""
     private var lastPairingPort = 0
     private var lastPairingConnectPort = 0
+    private var localSelfPairingToken = ""
+    private var localSelfPairingRunning = false
+    private var localSelfPairingComplete = false
+    private var localSelfPairingFailedToken = ""
+    private var localSelfPairingLastError = ""
+    private var localSelfPairingThread: Thread? = null
+    private var lastLocalSelfPairingStatusAt = 0L
 
     private var awaitingWirelessDebugConfirmation = false
     private var deviceInfoFallback = false
@@ -82,6 +89,14 @@ internal class SelfArmWirelessDebuggingAutomator(
         lastPairingHost = wifiIpv4()
         lastPairingPort = 0
         lastPairingConnectPort = 0
+        localSelfPairingToken = ""
+        localSelfPairingRunning = false
+        localSelfPairingComplete = false
+        localSelfPairingFailedToken = ""
+        localSelfPairingLastError = ""
+        localSelfPairingThread?.interrupt()
+        localSelfPairingThread = null
+        lastLocalSelfPairingStatusAt = 0L
         awaitingWirelessDebugConfirmation = false
         deviceInfoFallback = false
         developerEnableFlow = false
@@ -109,6 +124,8 @@ internal class SelfArmWirelessDebuggingAutomator(
     fun stop() {
         active = false
         handler.removeCallbacks(stepRunnable)
+        localSelfPairingThread?.interrupt()
+        localSelfPairingThread = null
     }
 
     fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -569,19 +586,113 @@ internal class SelfArmWirelessDebuggingAutomator(
             RelayHudController.showTransient(feedback)
         }
         if (token != lastPairingReadyToken || now - lastPairingReadyReportAt >= PAIRING_READY_REPORT_INTERVAL_MS) {
-            lastPairingReadyToken = token
-            lastPairingReadyReportAt = now
-            RelayBridge.sendSelfArmWirelessStatus(
-                setupState = "pairing_ready",
-                wifiIp = host,
-                adbPairCode = code,
-                adbPairHost = host,
-                adbPairPort = pairPort,
-                adbConnectPort = connectPort,
-            )
+            if (maybeStartLocalSelfPairing(token, code, host, pairPort, connectPort)) {
+                schedule(PAIRING_DIALOG_POLL_MS)
+                return true
+            }
+            sendPairingReadyStatus(token, code, host, pairPort, connectPort)
         }
         schedule(PAIRING_DIALOG_POLL_MS)
         return true
+    }
+
+    private fun maybeStartLocalSelfPairing(
+        token: String,
+        code: String,
+        host: String,
+        pairPort: Int,
+        connectPort: Int,
+    ): Boolean {
+        if (localSelfPairingComplete) return true
+        if (localSelfPairingRunning && localSelfPairingToken == token) {
+            reportLocalSelfPairingStarted(host, pairPort, connectPort)
+            return true
+        }
+        if (localSelfPairingFailedToken == token) return false
+        if (localSelfPairingRunning || code.length != 6 || pairPort <= 0 || connectPort <= 0) return false
+
+        localSelfPairingToken = token
+        localSelfPairingRunning = true
+        localSelfPairingLastError = ""
+        reportLocalSelfPairingStarted(host, pairPort, connectPort)
+        val worker = Thread {
+            val result = runCatching {
+                SelfArmLocalAdbBootstrapper(service.applicationContext).bootstrap(
+                    pairPort = pairPort,
+                    pairingCode = code,
+                    connectPort = connectPort,
+                )
+            }
+            handler.post {
+                if (localSelfPairingToken != token) return@post
+                localSelfPairingRunning = false
+                localSelfPairingThread = null
+                result.onSuccess { bootstrap ->
+                    localSelfPairingComplete = true
+                    lastConnectHost = bootstrap.connectHost
+                    lastConnectPort = bootstrap.connectPort
+                    Log.i(
+                        TAG,
+                        "local self-pair bootstrap complete pairPort=${bootstrap.pairPort} " +
+                            "connectPort=${bootstrap.connectPort}",
+                    )
+                    finish("wireless_bootstrap_complete", true)
+                }.onFailure { throwable ->
+                    localSelfPairingFailedToken = token
+                    localSelfPairingLastError = shortMessage(throwable)
+                    Log.w(TAG, "local self-pair bootstrap failed: $localSelfPairingLastError", throwable)
+                    if (!active) return@post
+                    RelayHudController.showTransient("Phone fallback pairing")
+                    RelayBridge.sendSelfArmWirelessStatus(
+                        setupState = "self_pairing_failed",
+                        wifiIp = host,
+                        adbPairHost = host,
+                        adbPairPort = pairPort,
+                        adbConnectPort = connectPort,
+                    )
+                    sendPairingReadyStatus(token, code, host, pairPort, connectPort)
+                    schedule(PAIRING_DIALOG_POLL_MS)
+                }
+            }
+        }.apply {
+            name = "RokidRelayLocalWirelessSelfArm"
+            isDaemon = true
+        }
+        localSelfPairingThread = worker
+        worker.start()
+        return true
+    }
+
+    private fun reportLocalSelfPairingStarted(host: String, pairPort: Int, connectPort: Int) {
+        val now = SystemClock.uptimeMillis()
+        if (now - lastLocalSelfPairingStatusAt < PAIRING_READY_REPORT_INTERVAL_MS) return
+        lastLocalSelfPairingStatusAt = now
+        RelayBridge.sendSelfArmWirelessStatus(
+            setupState = "self_pairing_started",
+            wifiIp = host,
+            adbPairHost = host,
+            adbPairPort = pairPort,
+            adbConnectPort = connectPort,
+        )
+    }
+
+    private fun sendPairingReadyStatus(
+        token: String,
+        code: String,
+        host: String,
+        pairPort: Int,
+        connectPort: Int,
+    ) {
+        lastPairingReadyToken = token
+        lastPairingReadyReportAt = SystemClock.uptimeMillis()
+        RelayBridge.sendSelfArmWirelessStatus(
+            setupState = "pairing_ready",
+            wifiIp = host,
+            adbPairCode = code,
+            adbPairHost = host,
+            adbPairPort = pairPort,
+            adbConnectPort = connectPort,
+        )
     }
 
     private fun reportCachedPairingReady() {
@@ -1002,6 +1113,9 @@ internal class SelfArmWirelessDebuggingAutomator(
 
     private fun parsePort(value: String?): Int =
         value?.toIntOrNull()?.takeIf { it in 1..65535 } ?: 0
+
+    private fun shortMessage(throwable: Throwable): String =
+        throwable.message.orEmpty().trim().ifBlank { throwable::class.java.simpleName }
 
     private fun wifiEnabled(): Boolean =
         wifiManager()?.isWifiEnabled == true

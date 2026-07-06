@@ -10,8 +10,8 @@ android {
         applicationId = "com.anezium.rokidrelay.glasses"
         minSdk = 31
         targetSdk = 32
-        versionCode = 20
-        versionName = "0.1.10-preview.10"
+        versionCode = 21
+        versionName = "0.1.10-preview.11"
     }
 
     buildTypes {
@@ -32,6 +32,9 @@ android {
 
 dependencies {
     implementation("com.rokid.cxr:cxr-service-bridge:1.0-20260522.063600-105")
+    implementation("dev.mobile:dadb:1.2.10")
+    implementation("com.flyfishxu:kadb:2.1.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.13")
 }

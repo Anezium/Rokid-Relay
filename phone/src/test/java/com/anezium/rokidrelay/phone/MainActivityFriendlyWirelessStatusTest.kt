@@ -26,6 +26,14 @@ class MainActivityFriendlyWirelessStatusTest {
     }
 
     @Test
+    fun friendlyWirelessStatusMapsGlassesWifiUnavailable() {
+        assertEquals(
+            "Connect the glasses to a Wi-Fi network first (any network works — no internet needed), then tap Bootstrap.",
+            friendly("wifi_enable_timeout"),
+        )
+    }
+
+    @Test
     fun friendlyWirelessStatusMapsProgressStates() {
         assertEquals("Pairing with the glasses…", friendly("Pairing with Wireless Debugging"))
         assertEquals(

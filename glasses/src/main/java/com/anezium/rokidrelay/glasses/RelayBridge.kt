@@ -401,6 +401,7 @@ object RelayBridge {
         sendCommand("self_arm_wireless_status") {
             put("setupState", setupState)
             put("wifiIp", wifiIp)
+            put("wifiConnected", wifiIp.isNotBlank())
             if (adbPairCode.isNotBlank()) put("adbPairCode", adbPairCode)
             if (adbPairHost.isNotBlank()) put("adbPairHost", adbPairHost)
             if (adbPairPort > 0) put("adbPairPort", adbPairPort)
