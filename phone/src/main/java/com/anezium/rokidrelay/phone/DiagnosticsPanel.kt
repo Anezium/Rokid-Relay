@@ -111,6 +111,9 @@ class DiagnosticsPanel(
             appendLine("Glasses BT: ${if (snapshot.glassConnected) "connected" else "waiting"}")
             appendLine("Glasses app: ${snapshot.bootstrapState}")
             appendLine("Self-arm: ${snapshot.selfArmStatus} key=${snapshot.selfArmKeyPresent}")
+            if (snapshot.selfArmSelfPairError.isNotBlank()) {
+                appendLine("Self-pair (glasses): ${snapshot.selfArmSelfPairError}")
+            }
             appendLine("Mic foreground: ${if (RelayService.microphoneForegroundActive) "active" else "off"}")
             if (!RelayService.microphoneForegroundActive && RelayService.lastMicrophoneForegroundError.isNotBlank()) {
                 appendLine("Mic foreground error: ${RelayService.lastMicrophoneForegroundError}")

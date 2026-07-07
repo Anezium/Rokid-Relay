@@ -639,7 +639,7 @@ internal class SelfArmWirelessDebuggingAutomator(
                     finish("wireless_bootstrap_complete", true)
                 }.onFailure { throwable ->
                     localSelfPairingFailedToken = token
-                    localSelfPairingLastError = shortMessage(throwable)
+                    localSelfPairingLastError = causeChainMessage(throwable)
                     Log.w(TAG, "local self-pair bootstrap failed: $localSelfPairingLastError", throwable)
                     if (!active) return@post
                     RelayHudController.showTransient("Phone fallback pairing")
@@ -649,6 +649,7 @@ internal class SelfArmWirelessDebuggingAutomator(
                         adbPairHost = host,
                         adbPairPort = pairPort,
                         adbConnectPort = connectPort,
+                        errorMessage = localSelfPairingLastError,
                     )
                     sendPairingReadyStatus(token, code, host, pairPort, connectPort)
                     schedule(PAIRING_DIALOG_POLL_MS)
@@ -1116,6 +1117,24 @@ internal class SelfArmWirelessDebuggingAutomator(
 
     private fun shortMessage(throwable: Throwable): String =
         throwable.message.orEmpty().trim().ifBlank { throwable::class.java.simpleName }
+
+    /**
+     * Full failure detail for the phone log: walk the cause chain so we never drop the underlying
+     * KADB/socket reason (e.g. "connection closed", "Connection refused") behind a generic wrapper.
+     */
+    private fun causeChainMessage(throwable: Throwable): String {
+        val parts = mutableListOf<String>()
+        val seen = HashSet<Throwable>()
+        var current: Throwable? = throwable
+        while (current != null && seen.add(current) && parts.size < 5) {
+            val simpleName = current::class.java.simpleName.ifBlank { "Throwable" }
+            val message = current.message.orEmpty().trim()
+            val piece = if (message.isBlank()) simpleName else "$simpleName: $message"
+            if (parts.isEmpty() || parts.last() != piece) parts.add(piece)
+            current = current.cause
+        }
+        return parts.joinToString(" <- ").take(400).ifBlank { "self pairing failed" }
+    }
 
     private fun wifiEnabled(): Boolean =
         wifiManager()?.isWifiEnabled == true

@@ -33,6 +33,7 @@ object RelayBridge {
         val selfArmStatus: String,
         val selfArmKeyPresent: Boolean,
         val selfArmWirelessStatus: String,
+        val selfArmSelfPairError: String,
         val selfArmWirelessBootstrapped: Boolean,
         val selfArmWirelessInProgress: Boolean,
         val selfArmPairingCodeReady: Boolean,
@@ -78,6 +79,7 @@ object RelayBridge {
     @Volatile private var selfArmStatus = "not provisioned"
     @Volatile private var selfArmKeyPresent = false
     @Volatile private var selfArmWirelessStatus = "not bootstrapped"
+    @Volatile private var selfArmSelfPairError = ""
     @Volatile private var selfArmWirelessBootstrapped = false
     @Volatile private var selfArmWirelessInProgress = false
     @Volatile private var selfArmWirelessPairingCode = ""
@@ -209,6 +211,7 @@ object RelayBridge {
         selfArmStatus = selfArmStatus,
         selfArmKeyPresent = selfArmKeyPresent,
         selfArmWirelessStatus = selfArmWirelessStatus,
+        selfArmSelfPairError = selfArmSelfPairError,
         selfArmWirelessBootstrapped = selfArmWirelessBootstrapped,
         selfArmWirelessInProgress = selfArmWirelessInProgress,
         selfArmPairingCodeReady = selfArmWirelessPairingCode.isNotBlank(),
@@ -845,10 +848,12 @@ object RelayBridge {
         val code = json.optString("adbPairCode").filter { it.isDigit() }
         val pairPort = json.optInt("adbPairPort", 0)
         val connectPort = json.optInt("adbConnectPort", json.optInt("adbPort", 0))
+        val glassesError = json.optString("errorMessage").trim()
         Log.i(
             WIRELESS_TAG,
             "status received setupState=${status.ifBlank { "blank" }} codeLen=${code.length} " +
-                "host=$host pairPort=$pairPort connectPort=$connectPort",
+                "host=$host pairPort=$pairPort connectPort=$connectPort " +
+                "error=${glassesError.ifBlank { "none" }}",
         )
         if (glassesWifiUnavailable(status, json, host)) {
             Log.w(WIRELESS_TAG, "glasses Wi-Fi unavailable status=$status host=$host")
@@ -865,8 +870,15 @@ object RelayBridge {
             return
         }
         when (status) {
-            "self_pairing_started" -> selfArmLocalSelfPairingInFlight = true
-            "self_pairing_failed" -> selfArmLocalSelfPairingInFlight = false
+            "self_pairing_started" -> {
+                selfArmLocalSelfPairingInFlight = true
+                selfArmSelfPairError = ""
+            }
+            "self_pairing_failed" -> {
+                selfArmLocalSelfPairingInFlight = false
+                selfArmSelfPairError = glassesError.ifBlank { "self pairing failed (no detail reported by glasses)" }
+                Log.w(WIRELESS_TAG, "glasses on-device self-pair failed: $selfArmSelfPairError")
+            }
         }
         val incomingStatus = status.replace('_', ' ')
         if (!(selfArmWirelessBootstrapRunning && code.length == 6)) {
@@ -888,6 +900,7 @@ object RelayBridge {
             selfArmWirelessBootstrapped = true
             selfArmWirelessInProgress = false
             selfArmLocalSelfPairingInFlight = false
+            selfArmSelfPairError = ""
             selfArmWirelessBootstrapRunning = false
             selfArmWirelessBootstrapWatchdog?.let { main.removeCallbacks(it) }
             selfArmWirelessBootstrapWatchdog = null
@@ -1159,6 +1172,7 @@ object RelayBridge {
             selfArmWirelessBootstrapped = true
             selfArmWirelessInProgress = false
             selfArmLocalSelfPairingInFlight = false
+            selfArmSelfPairError = ""
             selfArmWirelessPairingCode = ""
             selfArmWirelessPairHost = bootstrap.connectHost
             selfArmWirelessConnectPort = bootstrap.connectPort
@@ -1206,8 +1220,19 @@ object RelayBridge {
         }
     }
 
-    private fun Throwable.readableSelfArmMessage(): String =
-        message.orEmpty().ifBlank { this::class.java.simpleName }
+    private fun Throwable.readableSelfArmMessage(): String {
+        val parts = mutableListOf<String>()
+        val seen = HashSet<Throwable>()
+        var current: Throwable? = this
+        while (current != null && seen.add(current) && parts.size < 5) {
+            val simpleName = current!!::class.java.simpleName.ifBlank { "Throwable" }
+            val message = current!!.message.orEmpty().trim()
+            val piece = if (message.isBlank()) simpleName else message
+            if (parts.isEmpty() || parts.last() != piece) parts.add(piece)
+            current = current!!.cause
+        }
+        return parts.joinToString(" <- ").take(400).ifBlank { this::class.java.simpleName }
+    }
 
     private fun JSONObject.appendUserSettings(): JSONObject {
         val context = appContext

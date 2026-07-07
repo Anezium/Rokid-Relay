@@ -397,6 +397,7 @@ object RelayBridge {
         adbPairHost: String = "",
         adbPairPort: Int = 0,
         adbConnectPort: Int = 0,
+        errorMessage: String = "",
     ) {
         sendCommand("self_arm_wireless_status") {
             put("setupState", setupState)
@@ -409,6 +410,7 @@ object RelayBridge {
                 put("adbConnectPort", adbConnectPort)
                 put("adbPort", adbConnectPort)
             }
+            if (errorMessage.isNotBlank()) put("errorMessage", errorMessage)
         }
     }
 

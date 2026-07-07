@@ -47,14 +47,13 @@ internal class SelfArmLocalAdbBootstrapper(
         return try {
             val probe = kadb.shell("echo rokid-relay")
             if (probe.exitCode != 0 || probe.output.trim() != "rokid-relay") {
-                throw IOException("unexpected ADB probe response: ${probe.allOutput}")
+                throw IOException("connect probe failed on 127.0.0.1:$connectPort: ${probe.allOutput.trim()}")
             }
             val bootstrap = kadb.shell(buildBootstrapCommand())
             if (bootstrap.exitCode != 0) {
                 throw IOException(
-                    "ADB shell command failed with exit ${bootstrap.exitCode}\n" +
-                        bootstrap.errorOutput +
-                        bootstrap.output,
+                    "grant shell failed with exit ${bootstrap.exitCode}: " +
+                        (bootstrap.errorOutput + bootstrap.output).trim(),
                 )
             }
             val marker = bootstrap.output
@@ -70,7 +69,11 @@ internal class SelfArmLocalAdbBootstrapper(
                 output = bootstrap.output,
             )
         } catch (exception: RuntimeException) {
-            throw IOException(exception.message.orEmpty().ifBlank { exception::class.java.simpleName }, exception)
+            throw IOException(
+                "connect to 127.0.0.1:$connectPort failed: " +
+                    exception.message.orEmpty().ifBlank { exception::class.java.simpleName },
+                exception,
+            )
         } finally {
             runCatching { kadb.close() }
         }

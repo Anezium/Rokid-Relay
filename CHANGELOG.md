@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.15-preview.24 - 2026-07-07
+
+- Surfaced the real reason on-glasses self-pairing fails. When the glasses' own `127.0.0.1` Wireless Debugging self-pair fails and hands off to the legacy phone LAN path, the phone previously only showed the fallback's generic `connection closed`, hiding the actual cause. The glasses now report their full self-pair failure detail (with the cause chain, e.g. `IOException: connect probe failed on 127.0.0.1:… <- …`) to the phone.
+- Added a dedicated, non-overwritten `Self-pair (glasses):` line to the phone's Last activity diagnostics so the on-glasses failure reason is always visible next to (not clobbered by) the LAN fallback result.
+- Tagged the glasses self-pair stages in error messages (`connect probe failed on 127.0.0.1:<port>`, `grant shell failed with exit <n>`, `connect to 127.0.0.1:<port> failed`) so the failing step is unambiguous.
+- Phone self-arm failure messages now include the full exception cause chain instead of only the top-level message.
+- Bumped the phone app to `0.1.15-preview.24` / `versionCode 39` and the bundled glasses helper to `0.1.10-preview.12` / `versionCode 22`.
+
 ## Unreleased
 
 - Added a PC-free one-time Wireless Debugging bootstrap for self-arm recovery: the phone pairs with KADB, grants `WRITE_SECURE_SETTINGS`, enables adb-wifi, persists ADB TCP port `5555`, and trusts the Relay recovery public key.
