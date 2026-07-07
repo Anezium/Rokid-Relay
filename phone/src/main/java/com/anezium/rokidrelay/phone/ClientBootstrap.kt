@@ -20,7 +20,11 @@ class ClientBootstrap(
         val readyForMessages: Boolean,
     )
 
-    fun ensureReady(openAfterInstall: Boolean = false): Result {
+    fun ensureReady(
+        openAfterInstall: Boolean = false,
+        forceUpdateAndLaunch: Boolean = false,
+        onProgress: ((String) -> Unit)? = null,
+    ): Result {
         val installedState = queryInstalled()
         val apk = extractAssetApk()
         val assetInfo = apk?.clientAssetInfo()
@@ -37,7 +41,7 @@ class ClientBootstrap(
         val shouldInstall = !installed || bundledChanged
         if (!shouldInstall) {
             if (clientLaunchPending()) {
-                if (openAfterInstall) {
+                if (openAfterInstall || forceUpdateAndLaunch) {
                     return openClient(successStatus = "glasses app started after background install")
                 }
                 return Result(
@@ -57,7 +61,7 @@ class ClientBootstrap(
                 readyForMessages = true,
             )
         }
-        if (!openAfterInstall) {
+        if (!openAfterInstall && !forceUpdateAndLaunch) {
             val readyForMessages = installed
             Log.i(
                 TAG,
@@ -82,6 +86,15 @@ class ClientBootstrap(
                 readyForMessages = false,
             )
         }
+        if (forceUpdateAndLaunch) {
+            onProgress?.invoke(
+                if (installed) {
+                    "Updating glasses helper..."
+                } else {
+                    "Installing glasses helper..."
+                },
+            )
+        }
         Log.i(TAG, "installing bundled glasses app ${assetInfo?.label.orEmpty().ifBlank { apk.name }}")
         if (!installApk(apk)) {
             return Result(
@@ -93,7 +106,7 @@ class ClientBootstrap(
         }
         assetInfo?.let(::rememberInstalledClient)
         markClientLaunchPending()
-        if (!openAfterInstall) {
+        if (!openAfterInstall && !forceUpdateAndLaunch) {
             return Result(
                 "glasses app installed/updated in background",
                 success = true,

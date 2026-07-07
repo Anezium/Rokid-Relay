@@ -35,6 +35,7 @@ class MainActivityFriendlyWirelessStatusTest {
 
     @Test
     fun friendlyWirelessStatusMapsProgressStates() {
+        assertEquals("Updating glasses helper...", friendly("Updating glasses helper..."))
         assertEquals("Pairing with the glasses…", friendly("Pairing with Wireless Debugging"))
         assertEquals(
             "Reading the pairing code from the glasses…",
@@ -54,6 +55,10 @@ class MainActivityFriendlyWirelessStatusTest {
             friendly("Pairing code expired"),
         )
         assertEquals("KADB configure failed", friendly("Wireless ADB bootstrap failed: KADB configure failed"))
+        assertEquals(
+            "Glasses helper update failed: glasses start failed",
+            friendly("Glasses helper update failed: glasses start failed"),
+        )
         assertEquals(
             "Bootstrap failed. Keep both on the same Wi-Fi and tap Bootstrap again.",
             friendly("Wireless ADB bootstrap failed"),

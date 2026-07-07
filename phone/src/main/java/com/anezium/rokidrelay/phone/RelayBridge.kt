@@ -87,6 +87,7 @@ object RelayBridge {
     @Volatile private var selfArmWirelessPairPort = 0
     @Volatile private var selfArmWirelessConnectPort = 0
     @Volatile private var selfArmWirelessSetupRequested = false
+    @Volatile private var selfArmWirelessHelperUpdateFailed = false
     @Volatile private var selfArmWirelessBootstrapRunning = false
     @Volatile private var lastSelfArmPairingToken = ""
     @Volatile private var activeSelfArmPairingToken = ""
@@ -99,6 +100,7 @@ object RelayBridge {
     @Volatile private var bootstrapStarted = false
     @Volatile private var bootstrapInFlight = false
     @Volatile private var bootstrapReadyForMessages = false
+    @Volatile private var bootstrapHelperUpdatePending = false
     @Volatile private var bootstrapEpoch = 0L
     @Volatile private var bootstrapMayOpenClient = false
     @Volatile private var bootstrapOpenClientDeadlineMs = 0L
@@ -146,6 +148,7 @@ object RelayBridge {
             bootstrapStarted = false
             bootstrapInFlight = false
             bootstrapReadyForMessages = false
+            bootstrapHelperUpdatePending = false
             clearForegroundOpenRequest()
             bootstrapState = "stopped"
             lastStatus = "stopped"
@@ -224,13 +227,26 @@ object RelayBridge {
             SelfArmProvisioner.markWirelessBootstrapRequested(targetContext)
         }
         selfArmWirelessSetupRequested = true
+        selfArmWirelessHelperUpdateFailed = false
         selfArmWirelessInProgress = true
         selfArmLocalSelfPairingInFlight = false
         selfArmWirelessStatus = "Opening Wireless Debugging on glasses"
         selfArmStatus = selfArmWirelessStatus
         lastStatus = selfArmWirelessStatus
-        if (bootstrapReadyForMessages && cxrConnected && glassConnected) {
-            sendSelfArmWirelessSetupRequest()
+        if (cxrConnected && glassConnected) {
+            if (
+                canSendSelfArmWirelessSetup(
+                    bootstrapReadyForMessages = bootstrapReadyForMessages,
+                    cxrConnected = cxrConnected,
+                    glassConnected = glassConnected,
+                    helperUpdatePending = bootstrapHelperUpdatePending,
+                    helperUpdateFailed = selfArmWirelessHelperUpdateFailed,
+                )
+            ) {
+                sendSelfArmWirelessSetupRequest()
+            } else {
+                maybeBootstrap(forceWirelessSetupUpdate = true)
+            }
         }
         return true
     }
@@ -421,6 +437,7 @@ object RelayBridge {
         bootstrapStarted = false
         bootstrapInFlight = false
         bootstrapReadyForMessages = false
+        bootstrapHelperUpdatePending = false
         authToken = token
         val localLink = ensureLink(context)
         bootstrapState = "waiting for glasses"
@@ -450,6 +467,7 @@ object RelayBridge {
                     bootstrapStarted = false
                     bootstrapInFlight = false
                     bootstrapReadyForMessages = false
+                    bootstrapHelperUpdatePending = false
                     clearForegroundOpenRequest()
                     bootstrapState = "not connected"
                     lastStatus = "CXR-L disconnected"
@@ -471,6 +489,7 @@ object RelayBridge {
                     bootstrapStarted = false
                     bootstrapInFlight = false
                     bootstrapReadyForMessages = false
+                    bootstrapHelperUpdatePending = false
                     clearForegroundOpenRequest()
                     bootstrapState = if (cxrConnected) "waiting for glasses" else "not connected"
                 }
@@ -525,6 +544,7 @@ object RelayBridge {
             }
             bootstrapStarted = false
             bootstrapReadyForMessages = false
+            bootstrapHelperUpdatePending = false
             clearForegroundOpenRequest()
             bootstrapState = "reconnecting"
             lastStatus = "reconnecting CXR-L"
@@ -562,19 +582,41 @@ object RelayBridge {
         }
     }
 
-    private fun maybeBootstrap(allowForegroundOpen: Boolean = false) {
+    private fun maybeBootstrap(
+        allowForegroundOpen: Boolean = false,
+        forceWirelessSetupUpdate: Boolean = false,
+    ) {
         val context = appContext ?: return
         val localLink = link ?: return
         if (!cxrConnected || !glassConnected) return
         if (bootstrapInFlight) return
         val foregroundOpenActive = allowForegroundOpen && foregroundOpenRequestActive()
+        val wirelessSetupPending =
+            selfArmWirelessSetupRequested && !SelfArmProvisioner.wirelessBootstrapped(context)
+        val forceHelperUpdateForWirelessSetup = forceWirelessSetupUpdate && wirelessSetupPending
+        if (bootstrapStarted && forceHelperUpdateForWirelessSetup && bootstrapHelperUpdatePending) {
+            bootstrapStarted = false
+            bootstrapReadyForMessages = false
+        }
         if (bootstrapStarted) {
             if (foregroundOpenActive) {
                 bootstrapStarted = false
                 bootstrapReadyForMessages = false
             } else if (bootstrapReadyForMessages) {
-                if (selfArmWirelessSetupRequested && !SelfArmProvisioner.wirelessBootstrapped(context)) {
-                    sendSelfArmWirelessSetupRequest()
+                if (wirelessSetupPending) {
+                    if (
+                        canSendSelfArmWirelessSetup(
+                            bootstrapReadyForMessages = bootstrapReadyForMessages,
+                            cxrConnected = cxrConnected,
+                            glassConnected = glassConnected,
+                            helperUpdatePending = bootstrapHelperUpdatePending,
+                            helperUpdateFailed = selfArmWirelessHelperUpdateFailed,
+                        )
+                    ) {
+                        sendSelfArmWirelessSetupRequest()
+                    } else if (bootstrapHelperUpdatePending) {
+                        maybeBootstrap(forceWirelessSetupUpdate = true)
+                    }
                     return
                 }
                 flushPendingNotification()
@@ -594,15 +636,29 @@ object RelayBridge {
         bootstrapReadyForMessages = false
         bootstrapState = "preparing glasses app"
         val openAfterInstall = foregroundOpenActive
+        val forceUpdateAndLaunch = forceHelperUpdateForWirelessSetup
         val epoch = bootstrapEpoch
         Thread {
-            val result = ClientBootstrap(context, localLink).ensureReady(openAfterInstall = openAfterInstall)
+            val result = ClientBootstrap(context, localLink).ensureReady(
+                openAfterInstall = openAfterInstall,
+                forceUpdateAndLaunch = forceUpdateAndLaunch,
+                onProgress = { progress ->
+                    main.post {
+                        if (epoch == bootstrapEpoch && link === localLink && forceUpdateAndLaunch) {
+                            selfArmWirelessStatus = progress
+                            selfArmStatus = progress
+                            lastStatus = progress
+                        }
+                    }
+                },
+            )
             main.post {
                 if (epoch != bootstrapEpoch || link !== localLink) return@post
                 val rerunForForegroundOpen = !openAfterInstall && foregroundOpenRequestActive() && result.success
                 bootstrapInFlight = false
                 if (openAfterInstall) clearForegroundOpenRequest()
                 bootstrapReadyForMessages = result.readyForMessages
+                bootstrapHelperUpdatePending = clientBootstrapNeedsHelperUpdateOrLaunch(result.status)
                 if (rerunForForegroundOpen) {
                     bootstrapStarted = false
                     bootstrapReadyForMessages = false
@@ -610,15 +666,29 @@ object RelayBridge {
                 bootstrapState = result.status
                 lastStatus = result.status
                 sendState()
+                if (forceUpdateAndLaunch && !result.success) {
+                    failSelfArmWirelessHelperUpdate(context, result.status)
+                    sendState()
+                    return@post
+                }
                 if (result.success && result.readyForMessages) {
                     main.postDelayed(
                         {
                             if (epoch == bootstrapEpoch) {
-                                if (
-                                    selfArmWirelessSetupRequested &&
-                                    !SelfArmProvisioner.wirelessBootstrapped(context)
-                                ) {
-                                    sendSelfArmWirelessSetupRequest()
+                                if (selfArmWirelessSetupRequested && !SelfArmProvisioner.wirelessBootstrapped(context)) {
+                                    if (
+                                        canSendSelfArmWirelessSetup(
+                                            bootstrapReadyForMessages = bootstrapReadyForMessages,
+                                            cxrConnected = cxrConnected,
+                                            glassConnected = glassConnected,
+                                            helperUpdatePending = bootstrapHelperUpdatePending,
+                                            helperUpdateFailed = selfArmWirelessHelperUpdateFailed,
+                                        )
+                                    ) {
+                                        sendSelfArmWirelessSetupRequest()
+                                    } else if (bootstrapHelperUpdatePending) {
+                                        maybeBootstrap(forceWirelessSetupUpdate = true)
+                                    }
                                 } else {
                                     provisionSelfArmIfArmed()
                                 }
@@ -673,7 +743,19 @@ object RelayBridge {
             "request_state" -> {
                 sendState()
                 if (selfArmWirelessSetupRequested && !SelfArmProvisioner.wirelessBootstrapped(context)) {
-                    sendSelfArmWirelessSetupRequest()
+                    if (
+                        canSendSelfArmWirelessSetup(
+                            bootstrapReadyForMessages = bootstrapReadyForMessages,
+                            cxrConnected = cxrConnected,
+                            glassConnected = glassConnected,
+                            helperUpdatePending = bootstrapHelperUpdatePending,
+                            helperUpdateFailed = selfArmWirelessHelperUpdateFailed,
+                        )
+                    ) {
+                        sendSelfArmWirelessSetupRequest()
+                    } else if (bootstrapHelperUpdatePending) {
+                        maybeBootstrap(forceWirelessSetupUpdate = true)
+                    }
                 } else {
                     provisionSelfArmIfArmed()
                 }
@@ -824,6 +906,20 @@ object RelayBridge {
     }
 
     private fun sendSelfArmWirelessSetupRequest() {
+        if (
+            !canSendSelfArmWirelessSetup(
+                bootstrapReadyForMessages = bootstrapReadyForMessages,
+                cxrConnected = cxrConnected,
+                glassConnected = glassConnected,
+                helperUpdatePending = bootstrapHelperUpdatePending,
+                helperUpdateFailed = selfArmWirelessHelperUpdateFailed,
+            )
+        ) {
+            if (bootstrapHelperUpdatePending) {
+                maybeBootstrap(forceWirelessSetupUpdate = true)
+            }
+            return
+        }
         val sent = sendJson(
             Constants.KEY_EVENT,
             JSONObject()
@@ -833,6 +929,7 @@ object RelayBridge {
         )
         if (sent) {
             selfArmWirelessSetupRequested = false
+            selfArmWirelessHelperUpdateFailed = false
             selfArmWirelessInProgress = true
             selfArmWirelessStatus = "Wireless Debugging setup sent to glasses"
             lastStatus = selfArmWirelessStatus
@@ -843,6 +940,10 @@ object RelayBridge {
     }
 
     private fun handleSelfArmWirelessStatus(context: Context, json: JSONObject) {
+        if (selfArmWirelessHelperUpdateFailed) {
+            Log.w(WIRELESS_TAG, "ignoring wireless status after glasses helper update failure")
+            return
+        }
         val status = json.optString("setupState", json.optString("status", "Wireless setup active"))
         val host = json.optString("wifiIp", json.optString("adbPairHost"))
         val code = json.optString("adbPairCode").filter { it.isDigit() }
@@ -960,6 +1061,9 @@ object RelayBridge {
             val waitingForLocalSelfPairing = selfArmLocalSelfPairingInFlight && status != "self_pairing_failed"
             val decision = when {
                 alreadyComplete -> "skip_complete"
+                // A stale pairing dialog from an old helper keeps resending its code; never let
+                // that start the legacy LAN path while the helper update/launch is still pending.
+                bootstrapHelperUpdatePending -> "wait_for_helper_update"
                 waitingForLocalSelfPairing -> "wait_for_self_pairing"
                 running && !activeTokenChanged -> "skip_same_token_running"
                 running -> "queue_superseding_token"
@@ -973,6 +1077,12 @@ object RelayBridge {
             )
             when (decision) {
                 "skip_complete" -> Unit
+                "wait_for_helper_update" -> {
+                    Log.i(
+                        WIRELESS_TAG,
+                        "phone LAN bootstrap suppressed while glasses helper update is pending",
+                    )
+                }
                 "wait_for_self_pairing" -> {
                     Log.i(
                         WIRELESS_TAG,
@@ -1234,6 +1344,27 @@ object RelayBridge {
         return parts.joinToString(" <- ").take(400).ifBlank { this::class.java.simpleName }
     }
 
+    private fun failSelfArmWirelessHelperUpdate(context: Context, status: String) {
+        val failureStatus = glassesHelperUpdateFailureStatus(status)
+        Log.w(WIRELESS_TAG, failureStatus)
+        selfArmWirelessSetupRequested = false
+        selfArmWirelessHelperUpdateFailed = true
+        selfArmWirelessInProgress = false
+        selfArmLocalSelfPairingInFlight = false
+        bootstrapStarted = false
+        bootstrapReadyForMessages = false
+        bootstrapHelperUpdatePending = false
+        bootstrapState = failureStatus
+        selfArmWirelessStatus = failureStatus
+        selfArmStatus = failureStatus
+        lastStatus = failureStatus
+        SelfArmProvisioner.markWirelessBootstrapFailed(
+            context = context,
+            status = failureStatus,
+            error = failureStatus,
+        )
+    }
+
     private fun JSONObject.appendUserSettings(): JSONObject {
         val context = appContext
         if (context == null) {
@@ -1401,3 +1532,26 @@ internal fun canSendNotificationEvent(
     serviceConnected: Boolean,
 ): Boolean =
     bootstrapReadyForMessages || (cxrConnected && glassConnected && serviceConnected)
+
+internal fun canSendSelfArmWirelessSetup(
+    bootstrapReadyForMessages: Boolean,
+    cxrConnected: Boolean,
+    glassConnected: Boolean,
+    helperUpdatePending: Boolean,
+    helperUpdateFailed: Boolean,
+): Boolean =
+    bootstrapReadyForMessages &&
+        cxrConnected &&
+        glassConnected &&
+        !helperUpdatePending &&
+        !helperUpdateFailed
+
+internal fun clientBootstrapNeedsHelperUpdateOrLaunch(status: String): Boolean =
+    status == "glasses helper update pending" ||
+        status == "glasses helper install pending" ||
+        status == "glasses app waiting for foreground launch"
+
+internal fun glassesHelperUpdateFailureStatus(status: String): String {
+    val detail = status.trim().ifBlank { "unknown error" }
+    return "Glasses helper update failed: $detail"
+}

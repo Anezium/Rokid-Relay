@@ -1,5 +1,6 @@
 package com.anezium.rokidrelay.phone
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -76,5 +77,56 @@ class RelayBridgeStartReasonTest {
                 serviceConnected = true,
             ),
         )
+    }
+
+    @Test
+    fun selfArmWirelessSetupWaitsForPendingHelperUpdate() {
+        assertFalse(
+            canSendSelfArmWirelessSetup(
+                bootstrapReadyForMessages = true,
+                cxrConnected = true,
+                glassConnected = true,
+                helperUpdatePending = true,
+                helperUpdateFailed = false,
+            ),
+        )
+    }
+
+    @Test
+    fun selfArmWirelessSetupSendsWhenHelperIsCurrent() {
+        assertTrue(
+            canSendSelfArmWirelessSetup(
+                bootstrapReadyForMessages = true,
+                cxrConnected = true,
+                glassConnected = true,
+                helperUpdatePending = false,
+                helperUpdateFailed = false,
+            ),
+        )
+    }
+
+    @Test
+    fun selfArmWirelessSetupStaysBlockedAfterHelperUpdateFailure() {
+        assertFalse(
+            canSendSelfArmWirelessSetup(
+                bootstrapReadyForMessages = true,
+                cxrConnected = true,
+                glassConnected = true,
+                helperUpdatePending = false,
+                helperUpdateFailed = true,
+            ),
+        )
+        assertEquals(
+            "Glasses helper update failed: glasses start failed",
+            glassesHelperUpdateFailureStatus("glasses start failed"),
+        )
+    }
+
+    @Test
+    fun pendingHelperUpdateStatusesRequireUpdateOrLaunchBeforeWirelessSetup() {
+        assertTrue(clientBootstrapNeedsHelperUpdateOrLaunch("glasses helper update pending"))
+        assertTrue(clientBootstrapNeedsHelperUpdateOrLaunch("glasses helper install pending"))
+        assertTrue(clientBootstrapNeedsHelperUpdateOrLaunch("glasses app waiting for foreground launch"))
+        assertFalse(clientBootstrapNeedsHelperUpdateOrLaunch("glasses app ready in background"))
     }
 }

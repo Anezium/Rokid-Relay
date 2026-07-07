@@ -2089,6 +2089,10 @@ class MainActivity : Activity() {
         return when {
             value.contains("complete") || value.contains("bootstrap ready") ->
                 "Glasses recovery is ready"
+            value.contains("updating glasses helper") ||
+                value.contains("installing glasses helper") ||
+                value.contains("glasses helper update failed") ->
+                text
             value.contains("same wi-fi") || value.contains("same network") || value.contains("reach") ->
                 text
             value.contains("wifi_enable_timeout") ->
