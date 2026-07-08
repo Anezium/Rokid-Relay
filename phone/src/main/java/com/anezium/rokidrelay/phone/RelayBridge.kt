@@ -38,6 +38,7 @@ object RelayBridge {
         val selfArmWirelessInProgress: Boolean,
         val selfArmPairingCodeReady: Boolean,
         val selfArmGlassesState: SelfArmProvisioner.GlassesState?,
+        val selfArmGlassesStateLive: Boolean,
         val bootstrapReadyForMessages: Boolean,
     )
 
@@ -88,6 +89,7 @@ object RelayBridge {
     @Volatile private var selfArmWirelessPairPort = 0
     @Volatile private var selfArmWirelessConnectPort = 0
     @Volatile private var selfArmGlassesState: SelfArmProvisioner.GlassesState? = null
+    @Volatile private var selfArmGlassesStateLive = false
     @Volatile private var selfArmWirelessSetupRequested = false
     @Volatile private var selfArmWirelessHelperUpdateFailed = false
     @Volatile private var selfArmWirelessBootstrapRunning = false
@@ -147,6 +149,7 @@ object RelayBridge {
             pendingNotificationRetry = null
             cxrConnected = false
             glassConnected = false
+            selfArmGlassesStateLive = false
             bootstrapStarted = false
             bootstrapInFlight = false
             bootstrapReadyForMessages = false
@@ -222,6 +225,7 @@ object RelayBridge {
         selfArmPairingCodeReady = selfArmWirelessPairingCode.isNotBlank(),
         selfArmGlassesState = (context ?: appContext)?.let { SelfArmProvisioner.glassesState(it) }
             ?: selfArmGlassesState,
+        selfArmGlassesStateLive = selfArmGlassesStateLive,
         bootstrapReadyForMessages = bootstrapReadyForMessages,
     )
 
@@ -468,6 +472,7 @@ object RelayBridge {
                 } else {
                     bootstrapEpoch += 1L
                     glassConnected = false
+                    selfArmGlassesStateLive = false
                     bootstrapStarted = false
                     bootstrapInFlight = false
                     bootstrapReadyForMessages = false
@@ -490,6 +495,7 @@ object RelayBridge {
                     sendState()
                 } else {
                     bootstrapEpoch += 1L
+                    selfArmGlassesStateLive = false
                     bootstrapStarted = false
                     bootstrapInFlight = false
                     bootstrapReadyForMessages = false
@@ -704,6 +710,10 @@ object RelayBridge {
                 if (rerunForForegroundOpen) {
                     maybeBootstrap(allowForegroundOpen = true)
                 } else if (result.success && result.readyForMessages) {
+                    // The helper dedups its self-arm report per link session; after a
+                    // phone-side restart the glasses may never see a disconnect, so ask
+                    // for a forced report or the row stays on the stale wording.
+                    requestGlassesSelfArmState()
                     flushPendingNotification()
                     maybeStartPendingWakeVoice()
                 }
@@ -712,6 +722,16 @@ object RelayBridge {
             name = "RokidRelayBootstrap"
             start()
         }
+    }
+
+    private fun requestGlassesSelfArmState() {
+        sendJson(
+            Constants.KEY_EVENT,
+            JSONObject()
+                .put("version", Constants.PROTOCOL_VERSION)
+                .put("type", "request_state")
+                .put("source", "phone"),
+        )
     }
 
     private fun flushPendingNotification() {
@@ -877,6 +897,7 @@ object RelayBridge {
         )
         selfArmGlassesState = state
         SelfArmProvisioner.saveGlassesState(context, state)
+        selfArmGlassesStateLive = true
     }
 
     private fun sendState() {

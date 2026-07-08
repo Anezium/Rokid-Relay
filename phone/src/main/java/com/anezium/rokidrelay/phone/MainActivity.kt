@@ -1210,6 +1210,8 @@ class MainActivity : Activity() {
                 selfArmWireless = selfArmWireless,
                 relayEnabled = relayEnabled,
                 glassesState = snap.selfArmGlassesState,
+                glassesStateLive = snap.selfArmGlassesStateLive,
+                nowWallClockMs = System.currentTimeMillis(),
                 relayEnabledSetupMessage = selfArmRelayEnabledSetupMessage,
                 friendlyWirelessStatus = ::friendlyWirelessStatus,
             )

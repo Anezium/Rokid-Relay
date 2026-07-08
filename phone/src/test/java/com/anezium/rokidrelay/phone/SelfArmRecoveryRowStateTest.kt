@@ -16,11 +16,165 @@ class SelfArmRecoveryRowStateTest {
                 writeSecureGranted = true,
                 accessibilityEnabled = false,
             ),
+            glassesStateLive = true,
         )
 
         assertEquals("Armed on the glasses — they recover on their own", row.value)
         assertEquals(SelfArmRecoveryTone.Ready, row.tone)
         assertEquals("Re-arm", row.actionLabel)
+    }
+
+    @Test
+    fun staleGlassesConfirmedStateShowsAge() {
+        val row = rowState(
+            glassesState = glasses(
+                armed = true,
+                keyPresent = true,
+                writeSecureGranted = true,
+                accessibilityEnabled = true,
+                receivedAtWallClockMs = NOW_MS - 2L * 60L * 60L * 1_000L,
+            ),
+            glassesStateLive = false,
+        )
+
+        assertEquals("Armed on the glasses — last confirmed 2h ago", row.value)
+        assertEquals(SelfArmRecoveryTone.Ready, row.tone)
+        assertEquals("Re-arm", row.actionLabel)
+    }
+
+    @Test
+    fun staleGlassesConfirmedStateShowsJustNowForRecentReport() {
+        val row = rowState(
+            glassesState = glasses(
+                armed = true,
+                keyPresent = true,
+                writeSecureGranted = true,
+                accessibilityEnabled = true,
+                receivedAtWallClockMs = NOW_MS - 30_000L,
+            ),
+            glassesStateLive = false,
+        )
+
+        assertEquals("Armed on the glasses — last confirmed just now", row.value)
+    }
+
+    @Test
+    fun staleGlassesConfirmedStateShowsJustNowWhenReceivedTimeMissing() {
+        val row = rowState(
+            glassesState = glasses(
+                armed = true,
+                keyPresent = true,
+                writeSecureGranted = true,
+                accessibilityEnabled = true,
+                receivedAtWallClockMs = 0L,
+            ),
+            glassesStateLive = false,
+        )
+
+        assertEquals("Armed on the glasses — last confirmed just now", row.value)
+    }
+
+    @Test
+    fun grantMissingBrokenReportShowsRearmPrompt() {
+        val row = rowState(
+            selfArmProvisioned = true,
+            glassesState = glasses(
+                armed = true,
+                keyPresent = true,
+                writeSecureGranted = false,
+                accessibilityEnabled = true,
+            ),
+        )
+
+        assertEquals("Glasses report settings grant missing — tap Re-arm", row.value)
+        assertEquals(SelfArmRecoveryTone.Waiting, row.tone)
+        assertEquals("Re-arm", row.actionLabel)
+    }
+
+    @Test
+    fun keyMissingBrokenReportShowsRearmPrompt() {
+        val row = rowState(
+            selfArmProvisioned = true,
+            glassesState = glasses(
+                armed = true,
+                keyPresent = false,
+                writeSecureGranted = true,
+                accessibilityEnabled = true,
+            ),
+        )
+
+        assertEquals("Glasses report recovery key missing — tap Re-arm", row.value)
+        assertEquals(SelfArmRecoveryTone.Waiting, row.tone)
+        assertEquals("Re-arm", row.actionLabel)
+    }
+
+    @Test
+    fun keyAndGrantMissingBrokenReportShowsRearmPrompt() {
+        val row = rowState(
+            selfArmProvisioned = true,
+            glassesState = glasses(
+                armed = true,
+                keyPresent = false,
+                writeSecureGranted = false,
+                accessibilityEnabled = true,
+            ),
+        )
+
+        assertEquals(
+            "Glasses report recovery key and settings grant missing — tap Re-arm",
+            row.value,
+        )
+        assertEquals(SelfArmRecoveryTone.Waiting, row.tone)
+        assertEquals("Re-arm", row.actionLabel)
+    }
+
+    @Test
+    fun brokenReportDoesNotRequirePhoneLocalProvisionedState() {
+        val row = rowState(
+            selfArmProvisioned = false,
+            glassesState = glasses(
+                armed = true,
+                keyPresent = false,
+                writeSecureGranted = true,
+                accessibilityEnabled = true,
+            ),
+        )
+
+        assertEquals("Glasses report recovery key missing — tap Re-arm", row.value)
+        assertEquals(SelfArmRecoveryTone.Waiting, row.tone)
+    }
+
+    @Test
+    fun brokenReportYieldsToWirelessBootstrapInProgress() {
+        val row = rowState(
+            selfArmProvisioned = true,
+            selfArmWireless = wireless(inProgress = true, status = "opening_pairing"),
+            glassesState = glasses(
+                armed = true,
+                keyPresent = false,
+                writeSecureGranted = false,
+                accessibilityEnabled = true,
+            ),
+        )
+
+        assertEquals("friendly:opening_pairing", row.value)
+        assertEquals(SelfArmRecoveryTone.Waiting, row.tone)
+    }
+
+    @Test
+    fun disablePendingOutranksBrokenReport() {
+        val row = rowState(
+            selfArmDisablePending = true,
+            glassesState = glasses(
+                armed = true,
+                keyPresent = false,
+                writeSecureGranted = false,
+                accessibilityEnabled = true,
+            ),
+        )
+
+        assertEquals("Disable pending", row.value)
+        assertEquals(SelfArmRecoveryTone.Waiting, row.tone)
     }
 
     @Test
@@ -33,6 +187,7 @@ class SelfArmRecoveryRowStateTest {
                 writeSecureGranted = true,
                 accessibilityEnabled = true,
             ),
+            glassesStateLive = true,
         )
 
         assertEquals("Disable pending", row.value)
@@ -57,6 +212,23 @@ class SelfArmRecoveryRowStateTest {
     }
 
     @Test
+    fun disarmedReportYieldsToWirelessBootstrapInProgress() {
+        val row = rowState(
+            selfArmProvisioned = true,
+            selfArmWireless = wireless(inProgress = true, status = "pairing_wireless"),
+            glassesState = glasses(
+                armed = false,
+                keyPresent = true,
+                writeSecureGranted = true,
+                accessibilityEnabled = true,
+            ),
+        )
+
+        assertEquals("friendly:pairing_wireless", row.value)
+        assertEquals(SelfArmRecoveryTone.Waiting, row.tone)
+    }
+
+    @Test
     fun absentGlassesReportKeepsPhoneLocalBehavior() {
         val provisioned = rowState(selfArmProvisioned = true, glassesState = null)
         assertEquals("Recovery armed", provisioned.value)
@@ -69,12 +241,51 @@ class SelfArmRecoveryRowStateTest {
         assertEquals("Bootstrap", bootstrapNeeded.actionLabel)
     }
 
+    @Test
+    fun provisionedStaysGreenWhileRelayEnabled() {
+        val row = rowState(
+            selfArmProvisioned = true,
+            relayEnabled = true,
+            glassesState = null,
+        )
+
+        assertEquals("Recovery armed", row.value)
+        assertEquals(SelfArmRecoveryTone.Ready, row.tone)
+        assertEquals("Re-arm", row.actionLabel)
+    }
+
+    @Test
+    fun provisionedOutranksCompletedBootstrapStatus() {
+        val row = rowState(
+            selfArmProvisioned = true,
+            selfArmWireless = wireless(complete = true, status = "Wireless ADB bootstrap complete"),
+            glassesState = null,
+        )
+
+        assertEquals("Recovery armed", row.value)
+        assertEquals(SelfArmRecoveryTone.Ready, row.tone)
+    }
+
+    @Test
+    fun provisionedOutranksStaleBootstrapError() {
+        val row = rowState(
+            selfArmProvisioned = true,
+            selfArmWireless = wireless(lastError = "old failure"),
+            glassesState = null,
+        )
+
+        assertEquals("Recovery armed", row.value)
+        assertEquals(SelfArmRecoveryTone.Ready, row.tone)
+    }
+
     private fun rowState(
         selfArmProvisioned: Boolean = false,
         selfArmDisablePending: Boolean = false,
         selfArmWireless: SelfArmProvisioner.WirelessBootstrap = wireless(),
         relayEnabled: Boolean = false,
         glassesState: SelfArmProvisioner.GlassesState? = null,
+        glassesStateLive: Boolean = true,
+        nowWallClockMs: Long = NOW_MS,
     ): SelfArmRecoveryRowState =
         selfArmRecoveryRowState(
             selfArmProvisioned = selfArmProvisioned,
@@ -82,6 +293,8 @@ class SelfArmRecoveryRowStateTest {
             selfArmWireless = selfArmWireless,
             relayEnabled = relayEnabled,
             glassesState = glassesState,
+            glassesStateLive = glassesStateLive,
+            nowWallClockMs = nowWallClockMs,
             relayEnabledSetupMessage = RELAY_SETUP_MESSAGE,
             friendlyWirelessStatus = { raw -> "friendly:$raw" },
         )
@@ -107,6 +320,7 @@ class SelfArmRecoveryRowStateTest {
         keyPresent: Boolean,
         writeSecureGranted: Boolean,
         accessibilityEnabled: Boolean,
+        receivedAtWallClockMs: Long = NOW_MS,
     ): SelfArmProvisioner.GlassesState =
         SelfArmProvisioner.GlassesState(
             armed = armed,
@@ -114,10 +328,11 @@ class SelfArmRecoveryRowStateTest {
             writeSecureGranted = writeSecureGranted,
             accessibilityEnabled = accessibilityEnabled,
             helperVersionCode = 22,
-            receivedAtWallClockMs = 1234L,
+            receivedAtWallClockMs = receivedAtWallClockMs,
         )
 
     private companion object {
+        const val NOW_MS = 1_700_000_000_000L
         const val RELAY_SETUP_MESSAGE = "phone-local setup message"
     }
 }
