@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.1.15 - 2026-07-08
+
+Stable release of the 0.1.15 line. Everything from previews 1–27 is included; see `docs/releases/` for the per-preview details.
+
+- Fixed a relaunch loop in the glasses self-arm direct repair: the repair relaunched the glasses app unconditionally, and the `singleTask` relaunch re-triggered the repair through `onNewIntent`. Repair is now idempotent (writes only settings that changed), relaunches at most once per 30 seconds and only when something was actually repaired, and `onNewIntent` no longer triggers self-arm.
+- Added the same 30-second backoff around `am start` in both bundled copies of the accessibility watchdog script, and made the app refresh its internal watchdog copy whenever it ships a newer script version (previously an existing copy was kept forever).
+- Reworded the bootstrap failure hint: it now asks for the glasses' Wi-Fi instead of the obsolete "keep both on the same Wi-Fi".
+- Bumped the phone app to `0.1.15` / `versionCode 43` and the bundled glasses helper to `0.1.10` / `versionCode 24`.
+
 ## v0.1.15-preview.24 - 2026-07-07
 
 - Surfaced the real reason on-glasses self-pairing fails. When the glasses' own `127.0.0.1` Wireless Debugging self-pair fails and hands off to the legacy phone LAN path, the phone previously only showed the fallback's generic `connection closed`, hiding the actual cause. The glasses now report their full self-pair failure detail (with the cause chain, e.g. `IOException: connect probe failed on 127.0.0.1:… <- …`) to the phone.
