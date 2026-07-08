@@ -60,7 +60,7 @@ class MainActivityFriendlyWirelessStatusTest {
             friendly("Glasses helper update failed: glasses start failed"),
         )
         assertEquals(
-            "Bootstrap failed. Keep both on the same Wi-Fi and tap Bootstrap again.",
+            "Bootstrap failed. Make sure the glasses are connected to Wi-Fi, then tap Bootstrap again.",
             friendly("Wireless ADB bootstrap failed"),
         )
     }

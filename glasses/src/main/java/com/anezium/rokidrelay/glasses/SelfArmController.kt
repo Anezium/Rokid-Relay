@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import org.json.JSONObject
@@ -16,6 +17,7 @@ import java.util.Base64
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 object SelfArmController {
     private const val TAG = "RokidRelaySelfArm"
@@ -36,7 +38,9 @@ object SelfArmController {
     private const val INSTALL_SENTINEL = "ROKID_RELAY_INSTALL_RESULT"
     private const val DISABLE_SENTINEL = "ROKID_RELAY_DISABLE_RESULT"
     private const val WATCHDOG_PIDFILE = "/data/local/tmp/rokid-relay-a11y-watchdog.pid"
+    private const val DIRECT_REPAIR_RELAUNCH_INTERVAL_MS = 30_000L
     private val selfArmRunning = AtomicBoolean(false)
+    private val lastDirectRepairRelaunchMs = AtomicLong(0L)
 
     data class ProvisionResult(
         val accepted: Boolean,
@@ -397,19 +401,42 @@ object SelfArmController {
                 resolver,
                 Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
             )
+            val accessibilityEnabled = Settings.Secure.getInt(
+                resolver,
+                Settings.Secure.ACCESSIBILITY_ENABLED,
+                0,
+            )
             val next = servicesWithRelayService(current)
-            if (current != next) {
+            val servicesChanged = current != next
+            val enabledChanged = accessibilityEnabled != 1
+            if (servicesChanged) {
                 Settings.Secure.putString(
                     resolver,
                     Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
                     next,
                 )
             }
-            Settings.Secure.putInt(resolver, Settings.Secure.ACCESSIBILITY_ENABLED, 1)
-            val launch = Intent(context, MainActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            context.startActivity(launch)
-            Log.i(TAG, "direct repair applied servicePresent=${current == next}")
+            if (enabledChanged) {
+                Settings.Secure.putInt(resolver, Settings.Secure.ACCESSIBILITY_ENABLED, 1)
+            }
+            if (servicesChanged || enabledChanged) {
+                if (markDirectRepairRelaunchAllowed()) {
+                    val launch = Intent(context, MainActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    context.startActivity(launch)
+                    Log.i(
+                        TAG,
+                        "direct repair applied servicesChanged=$servicesChanged enabledChanged=$enabledChanged relaunched=true",
+                    )
+                } else {
+                    Log.i(
+                        TAG,
+                        "direct repair applied servicesChanged=$servicesChanged enabledChanged=$enabledChanged relaunched=false",
+                    )
+                }
+            } else {
+                Log.i(TAG, "direct repair already armed; relaunch skipped")
+            }
             true
         }.getOrElse {
             Log.w(TAG, "direct repair failed: ${it.message}")
@@ -417,11 +444,32 @@ object SelfArmController {
         }
     }
 
+    private fun markDirectRepairRelaunchAllowed(): Boolean {
+        while (true) {
+            val now = SystemClock.elapsedRealtime()
+            val last = lastDirectRepairRelaunchMs.get()
+            if (last != 0L && now - last < DIRECT_REPAIR_RELAUNCH_INTERVAL_MS) return false
+            if (lastDirectRepairRelaunchMs.compareAndSet(last, now)) return true
+        }
+    }
+
+    private val watchdogVersionRegex = Regex("^VERSION=\"([^\"]+)\"$")
+
     private fun ensureInternalWatchdog(context: Context): File {
         val file = internalWatchdogFile(context)
-        if (!file.exists()) writeInternalWatchdog(context, readAssetScript(context))
+        if (!file.exists()) return writeInternalWatchdog(context, readAssetScript(context))
+        if (watchdogScriptVersion(file) != Constants.SELF_ARM_WATCHDOG_VERSION) {
+            runCatching { writeInternalWatchdog(context, readAssetScript(context)) }
+                .onFailure { Log.w(TAG, "watchdog refresh from asset failed: ${it.message}") }
+        }
         return file
     }
+
+    private fun watchdogScriptVersion(file: File): String? = runCatching {
+        file.useLines { lines ->
+            lines.firstNotNullOfOrNull { line -> watchdogVersionRegex.find(line)?.groupValues?.get(1) }
+        }
+    }.getOrNull()
 
     private fun writeInternalWatchdog(context: Context, script: String): File {
         val dir = selfArmDir(context)

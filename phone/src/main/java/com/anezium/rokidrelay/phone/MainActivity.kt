@@ -2119,10 +2119,10 @@ class MainActivity : Activity() {
                 val failedIndex = value.indexOf(failedPrefix)
                 if (failedIndex >= 0) {
                     text.substring(failedIndex + failedPrefix.length).trim().ifBlank {
-                        "Bootstrap failed. Keep both on the same Wi-Fi and tap Bootstrap again."
+                        "Bootstrap failed. Make sure the glasses are connected to Wi-Fi, then tap Bootstrap again."
                     }
                 } else {
-                    "Bootstrap failed. Keep both on the same Wi-Fi and tap Bootstrap again."
+                    "Bootstrap failed. Make sure the glasses are connected to Wi-Fi, then tap Bootstrap again."
                 }
             }
             else -> "Setting up glasses recovery…"

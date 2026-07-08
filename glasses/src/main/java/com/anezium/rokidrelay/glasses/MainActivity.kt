@@ -49,7 +49,6 @@ class MainActivity : Activity() {
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
         setIntent(intent)
-        refreshSelfArmFromForeground("main_activity_new_intent")
     }
 
     override fun onResume() {

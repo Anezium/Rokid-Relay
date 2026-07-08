@@ -9,8 +9,10 @@ PIDFILE="$BASE/$NAME.pid"
 LOGFILE="$BASE/$NAME.log"
 HEARTBEAT="$BASE/$NAME.heartbeat"
 VERSIONFILE="$BASE/$NAME.version"
-VERSION="2026-07-02.2"
+VERSION="2026-07-08.1"
 INTERVAL="${INTERVAL:-2}"
+START_BACKOFF_SECONDS=30
+LAST_START_EPOCH=0
 HOME_AFTER_REPAIR="${HOME_AFTER_REPAIR:-1}"
 
 log_line() {
@@ -76,12 +78,19 @@ repair_once() {
     settings put secure accessibility_enabled 1 2>>"$LOGFILE"
   fi
 
-  am start -n "$MAIN" --activity-clear-top >/dev/null 2>>"$LOGFILE"
-  if [ "$HOME_AFTER_REPAIR" = "1" ]; then
-    input keyevent 3 >/dev/null 2>>"$LOGFILE"
+  now="$(date '+%s')"
+  if [ $((now - LAST_START_EPOCH)) -ge "$START_BACKOFF_SECONDS" ]; then
+    am start -n "$MAIN" --activity-clear-top >/dev/null 2>>"$LOGFILE"
+    LAST_START_EPOCH="$now"
+    if [ "$HOME_AFTER_REPAIR" = "1" ]; then
+      input keyevent 3 >/dev/null 2>>"$LOGFILE"
+    fi
+    start_requested=1
+  else
+    start_requested=0
   fi
-  echo "$(date '+%s')" > "$HEARTBEAT"
-  log_line "repair requested a11y=$accessibility_enabled services=${enabled_services:-empty} appPid=$(app_pid)"
+  echo "$now" > "$HEARTBEAT"
+  log_line "repair requested a11y=$accessibility_enabled services=${enabled_services:-empty} start=$start_requested appPid=$(app_pid)"
 }
 
 loop_forever() {
