@@ -9,6 +9,7 @@ class BootReceiver : BroadcastReceiver() {
         if (intent?.action == Intent.ACTION_BOOT_COMPLETED) {
             val pendingResult = goAsync()
             SelfArmController.maybeStart(context, "boot_completed") {
+                RelayBridge.sendSelfArmState(context)
                 pendingResult.finish()
             }
         }

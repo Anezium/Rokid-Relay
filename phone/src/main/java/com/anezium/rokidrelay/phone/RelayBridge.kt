@@ -37,6 +37,7 @@ object RelayBridge {
         val selfArmWirelessBootstrapped: Boolean,
         val selfArmWirelessInProgress: Boolean,
         val selfArmPairingCodeReady: Boolean,
+        val selfArmGlassesState: SelfArmProvisioner.GlassesState?,
         val bootstrapReadyForMessages: Boolean,
     )
 
@@ -86,6 +87,7 @@ object RelayBridge {
     @Volatile private var selfArmWirelessPairHost = ""
     @Volatile private var selfArmWirelessPairPort = 0
     @Volatile private var selfArmWirelessConnectPort = 0
+    @Volatile private var selfArmGlassesState: SelfArmProvisioner.GlassesState? = null
     @Volatile private var selfArmWirelessSetupRequested = false
     @Volatile private var selfArmWirelessHelperUpdateFailed = false
     @Volatile private var selfArmWirelessBootstrapRunning = false
@@ -197,7 +199,7 @@ object RelayBridge {
         voiceRoute = status
     }
 
-    fun snapshot(): Snapshot = Snapshot(
+    fun snapshot(context: Context? = null): Snapshot = Snapshot(
         cxrConnected = cxrConnected,
         glassConnected = glassConnected,
         bootstrapState = bootstrapState,
@@ -218,6 +220,8 @@ object RelayBridge {
         selfArmWirelessBootstrapped = selfArmWirelessBootstrapped,
         selfArmWirelessInProgress = selfArmWirelessInProgress,
         selfArmPairingCodeReady = selfArmWirelessPairingCode.isNotBlank(),
+        selfArmGlassesState = (context ?: appContext)?.let { SelfArmProvisioner.glassesState(it) }
+            ?: selfArmGlassesState,
         bootstrapReadyForMessages = bootstrapReadyForMessages,
     )
 
@@ -761,6 +765,7 @@ object RelayBridge {
                 }
             }
             "self_arm_wireless_status" -> handleSelfArmWirelessStatus(context, json)
+            "self_arm_state" -> handleSelfArmState(context, json)
             "start_voice" -> {
                 val id = json.optString("notificationId")
                 val localLink = link
@@ -859,6 +864,19 @@ object RelayBridge {
             current
         } ?: return
         main.post(completion)
+    }
+
+    private fun handleSelfArmState(context: Context, json: JSONObject) {
+        val state = SelfArmProvisioner.GlassesState(
+            armed = json.optBoolean("armed", false),
+            keyPresent = json.optBoolean("keyPresent", false),
+            writeSecureGranted = json.optBoolean("writeSecureGranted", false),
+            accessibilityEnabled = json.optBoolean("accessibilityEnabled", false),
+            helperVersionCode = json.optInt("helperVersionCode", 0),
+            receivedAtWallClockMs = System.currentTimeMillis(),
+        )
+        selfArmGlassesState = state
+        SelfArmProvisioner.saveGlassesState(context, state)
     }
 
     private fun sendState() {

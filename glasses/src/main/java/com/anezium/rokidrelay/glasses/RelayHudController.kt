@@ -535,6 +535,9 @@ object RelayHudController {
         )
     }
 
+    fun accessibilityEnabled(): Boolean =
+        state.accessibilityEnabled
+
     private fun setAccessibilityEnabled(enabled: Boolean) {
         update { copy(accessibilityEnabled = enabled) }
     }

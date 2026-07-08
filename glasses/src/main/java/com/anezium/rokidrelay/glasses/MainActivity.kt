@@ -40,7 +40,9 @@ class MainActivity : Activity() {
         RelayHudController.refreshAccessibility(this)
         SelfArmController.allowProvisionFromForeground(this)
         RelayBridge.start(this)
-        SelfArmController.maybeStart(this, "main_activity")
+        SelfArmController.maybeStart(this, "main_activity") {
+            RelayBridge.sendSelfArmState(this)
+        }
         requestBluetoothPermissionsIfNeeded()
     }
 
@@ -141,7 +143,9 @@ class MainActivity : Activity() {
 
     private fun refreshSelfArmFromForeground(reason: String) {
         SelfArmController.allowProvisionFromForeground(this)
-        SelfArmController.maybeStart(this, reason)
+        SelfArmController.maybeStart(this, reason) {
+            RelayBridge.sendSelfArmState(this)
+        }
     }
 
     private fun requestBluetoothPermissionsIfNeeded() {

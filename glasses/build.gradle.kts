@@ -10,8 +10,8 @@ android {
         applicationId = "com.anezium.rokidrelay.glasses"
         minSdk = 31
         targetSdk = 32
-        versionCode = 22
-        versionName = "0.1.10-preview.12"
+        versionCode = 23
+        versionName = "0.1.10-preview.13"
     }
 
     buildTypes {

@@ -1,6 +1,8 @@
 package com.anezium.rokidrelay.glasses
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -18,6 +20,7 @@ object RelayBridge {
     private var bridge: CXRServiceBridge? = null
     private var appContext: Context? = null
     private var lastVoiceCommandAtMs = 0L
+    private var lastSelfArmStatePayload = ""
     private var pendingWakeReplyNotificationId = ""
     private var pendingWakeReplyExpiresAtMs = 0L
     private val pendingWakeReplyTimeout = Runnable {
@@ -36,6 +39,7 @@ object RelayBridge {
                 RelayHudController.setConnection("connecting")
             }
             requestState()
+            sendSelfArmState(context, force = false)
             return
         }
         val cxr = CXRServiceBridge()
@@ -46,10 +50,12 @@ object RelayBridge {
         val mediaResult = cxr.subscribe(Constants.KEY_MEDIA, msgCallback)
         Log.d(TAG, "subscribe event=$eventResult media=$mediaResult")
         requestState()
+        sendSelfArmState(context, force = false)
     }
 
     fun stop() {
         bridge = null
+        lastSelfArmStatePayload = ""
         clearPendingWakeReply()
     }
 
@@ -158,11 +164,15 @@ object RelayBridge {
                     RelayHudController.setConnection("waiting")
                 }
                 requestState()
+                appContext?.let { sendSelfArmState(it, force = false) }
             }
         }
 
         override fun onDisconnected() {
-            main.post { RelayHudController.setConnection("disconnected") }
+            main.post {
+                lastSelfArmStatePayload = ""
+                RelayHudController.setConnection("disconnected")
+            }
         }
 
         override fun onConnecting(name: String?, mac: String?, deviceType: Int) {
@@ -176,6 +186,7 @@ object RelayBridge {
                         RelayHudController.setConnection("waiting")
                     }
                     requestState()
+                    appContext?.let { sendSelfArmState(it, force = false) }
                 }
             }
         }
@@ -233,8 +244,10 @@ object RelayBridge {
                 RelayHudController.setConnection(
                     if (obj.optBoolean("glassConnected")) "connected" else "waiting",
                 )
+                appContext?.let { sendSelfArmState(it, force = false) }
                 maybeStartPendingWakeReply()
             }
+            "request_state" -> appContext?.let { sendSelfArmState(it, force = true) }
             "phone_sleeping" -> RelayHudController.phoneSleeping()
             "settings" -> applySettings(obj)
             "self_arm_provision" -> appContext?.let { context ->
@@ -248,6 +261,7 @@ object RelayBridge {
                             put("adbKeyProvisioned", SelfArmController.hasProvisionedKey(context))
                             put("watchdogVersion", Constants.SELF_ARM_WATCHDOG_VERSION)
                         }
+                        sendSelfArmState(context, force = false)
                     }
                 }.apply {
                     name = "RokidRelaySelfArmProvision"
@@ -263,6 +277,7 @@ object RelayBridge {
                             put("adbKeyProvisioned", SelfArmController.hasProvisionedKey(it))
                             put("watchdogVersion", Constants.SELF_ARM_WATCHDOG_VERSION)
                         }
+                        sendSelfArmState(it, force = false)
                     }
                 }
             }
@@ -413,6 +428,40 @@ object RelayBridge {
             if (errorMessage.isNotBlank()) put("errorMessage", errorMessage)
         }
     }
+
+    fun sendSelfArmState(context: Context? = appContext, force: Boolean = false) {
+        val app = context?.applicationContext ?: return
+        val payload = JSONObject()
+            .put("version", Constants.PROTOCOL_VERSION)
+            .put("type", "self_arm_state")
+            .put("source", "glasses")
+            .put("armed", SelfArmController.isArmed(app))
+            .put("keyPresent", SelfArmController.hasProvisionedKey(app))
+            .put(
+                "writeSecureGranted",
+                app.checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) ==
+                    PackageManager.PERMISSION_GRANTED,
+            )
+            .put("accessibilityEnabled", RelayHudController.accessibilityEnabled())
+            .put("helperVersionCode", helperVersionCode(app))
+        val serialized = payload.toString()
+        if (!force && serialized == lastSelfArmStatePayload) return
+        val localBridge = bridge ?: return
+        runCatching {
+            val result = localBridge.sendMessage(Constants.KEY_COMMAND, Caps().apply { write(serialized) })
+            if (result < 0) {
+                Log.w(TAG, "self-arm state send returned $result")
+            } else {
+                lastSelfArmStatePayload = serialized
+            }
+        }.onFailure {
+            Log.w(TAG, "send self-arm state failed: ${it.message}")
+        }
+    }
+
+    private fun helperVersionCode(context: Context): Int = runCatching {
+        context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode.toInt()
+    }.getOrDefault(0)
 
     private fun sendCommand(type: String, block: JSONObject.() -> Unit = {}) {
         val obj = JSONObject()

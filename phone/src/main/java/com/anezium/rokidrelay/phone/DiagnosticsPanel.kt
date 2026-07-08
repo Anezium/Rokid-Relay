@@ -111,6 +111,13 @@ class DiagnosticsPanel(
             appendLine("Glasses BT: ${if (snapshot.glassConnected) "connected" else "waiting"}")
             appendLine("Glasses app: ${snapshot.bootstrapState}")
             appendLine("Self-arm: ${snapshot.selfArmStatus} key=${snapshot.selfArmKeyPresent}")
+            snapshot.selfArmGlassesState?.let { state ->
+                appendLine(
+                    "Self-arm (glasses): armed=${state.armed} key=${state.keyPresent} " +
+                        "grant=${state.writeSecureGranted} a11y=${state.accessibilityEnabled} " +
+                        "helper=vc${state.helperVersionCode}",
+                )
+            }
             if (snapshot.selfArmSelfPairError.isNotBlank()) {
                 appendLine("Self-pair (glasses): ${snapshot.selfArmSelfPairError}")
             }

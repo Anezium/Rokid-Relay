@@ -1108,7 +1108,7 @@ class MainActivity : Activity() {
     }
 
     private fun renderStatus() {
-        val snap = RelayBridge.snapshot()
+        val snap = RelayBridge.snapshot(this)
         val hiRokid = CxrLAuth.isGlobalHiRokidInstalled(this)
         val notifications = notificationAccessEnabled()
         val authSaved = !savedToken().isNullOrBlank()
@@ -1202,35 +1202,22 @@ class MainActivity : Activity() {
             val selfArmProvisioned = SelfArmProvisioner.provisioned(this)
             val selfArmDisablePending = SelfArmProvisioner.disablePending(this)
             val selfArmWireless = SelfArmProvisioner.wirelessBootstrap(this)
+            val selfArmRelayEnabledSetupMessage =
+                "Connect the glasses to a Wi-Fi network first (any network works — no internet needed), then tap Bootstrap."
+            val selfArmRow = selfArmRecoveryRowState(
+                selfArmProvisioned = selfArmProvisioned,
+                selfArmDisablePending = selfArmDisablePending,
+                selfArmWireless = selfArmWireless,
+                relayEnabled = relayEnabled,
+                glassesState = snap.selfArmGlassesState,
+                relayEnabledSetupMessage = selfArmRelayEnabledSetupMessage,
+                friendlyWirelessStatus = ::friendlyWirelessStatus,
+            )
             setupRows.addView(setupRow(
                 title = "Self-arm recovery",
-                value = when {
-                    selfArmDisablePending -> "Disable pending"
-                    selfArmProvisioned -> "Recovery armed"
-                    selfArmWireless.complete -> friendlyWirelessStatus(
-                        selfArmWireless.status.ifBlank { "complete" },
-                    )
-                    selfArmWireless.lastError.isNotBlank() ->
-                        friendlyWirelessStatus(selfArmWireless.lastError)
-                    selfArmWireless.inProgress -> friendlyWirelessStatus(selfArmWireless.status)
-                    relayEnabled ->
-                        "Connect the glasses to a Wi-Fi network first (any network works — no internet needed), then tap Bootstrap."
-                    else -> "Off"
-                },
-                tone = when {
-                    selfArmProvisioned || selfArmWireless.complete -> StatusTone.Ready
-                    relayEnabled ||
-                        selfArmDisablePending ||
-                        selfArmWireless.inProgress ||
-                        selfArmWireless.lastError.isNotBlank() -> StatusTone.Waiting
-                    else -> StatusTone.Neutral
-                },
-                actionLabel = when {
-                    selfArmProvisioned -> "Re-arm"
-                    selfArmWireless.complete -> "Arm"
-                    relayEnabled -> "Bootstrap"
-                    else -> "Arm"
-                },
+                value = selfArmRow.value,
+                tone = selfArmRow.tone.toStatusTone(),
+                actionLabel = selfArmRow.actionLabel,
                 actionTone = ButtonTone.Secondary,
                 onClick = {
                     prepareSelfArmRecoveryOrAuthorize()
@@ -2010,6 +1997,13 @@ class MainActivity : Activity() {
     private fun rule(): View =
         View(this).apply {
             setBackgroundColor(COLOR_STROKE)
+        }
+
+    private fun SelfArmRecoveryTone.toStatusTone(): StatusTone =
+        when (this) {
+            SelfArmRecoveryTone.Ready -> StatusTone.Ready
+            SelfArmRecoveryTone.Waiting -> StatusTone.Waiting
+            SelfArmRecoveryTone.Neutral -> StatusTone.Neutral
         }
 
     private fun statusColor(tone: StatusTone): Int =

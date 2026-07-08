@@ -13,6 +13,12 @@ object SelfArmProvisioner {
     private const val PREF_WIRELESS_BOOTSTRAP_PAIR_PORT = "self_arm_wireless_bootstrap_pair_port"
     private const val PREF_WIRELESS_BOOTSTRAP_CONNECT_PORT = "self_arm_wireless_bootstrap_connect_port"
     private const val PREF_WIRELESS_BOOTSTRAP_LAST_ERROR = "self_arm_wireless_bootstrap_last_error"
+    private const val PREF_GLASSES_STATE_RECEIVED_AT_MS = "self_arm_glasses_state_received_at_ms"
+    private const val PREF_GLASSES_STATE_ARMED = "self_arm_glasses_state_armed"
+    private const val PREF_GLASSES_STATE_KEY_PRESENT = "self_arm_glasses_state_key_present"
+    private const val PREF_GLASSES_STATE_WRITE_SECURE_GRANTED = "self_arm_glasses_state_write_secure_granted"
+    private const val PREF_GLASSES_STATE_ACCESSIBILITY_ENABLED = "self_arm_glasses_state_accessibility_enabled"
+    private const val PREF_GLASSES_STATE_HELPER_VERSION_CODE = "self_arm_glasses_state_helper_version_code"
 
     data class Provision(
         val json: JSONObject,
@@ -27,6 +33,15 @@ object SelfArmProvisioner {
         val pairPort: Int,
         val connectPort: Int,
         val lastError: String,
+    )
+
+    data class GlassesState(
+        val armed: Boolean,
+        val keyPresent: Boolean,
+        val writeSecureGranted: Boolean,
+        val accessibilityEnabled: Boolean,
+        val helperVersionCode: Int,
+        val receivedAtWallClockMs: Long,
     )
 
     fun buildProvision(context: Context): Provision {
@@ -179,6 +194,33 @@ object SelfArmProvisioner {
             pairPort = prefs.getInt(PREF_WIRELESS_BOOTSTRAP_PAIR_PORT, 0),
             connectPort = prefs.getInt(PREF_WIRELESS_BOOTSTRAP_CONNECT_PORT, 0),
             lastError = prefs.getString(PREF_WIRELESS_BOOTSTRAP_LAST_ERROR, "").orEmpty(),
+        )
+    }
+
+    fun saveGlassesState(context: Context, state: GlassesState) {
+        context.applicationContext
+            .getSharedPreferences(Constants.PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putLong(PREF_GLASSES_STATE_RECEIVED_AT_MS, state.receivedAtWallClockMs)
+            .putBoolean(PREF_GLASSES_STATE_ARMED, state.armed)
+            .putBoolean(PREF_GLASSES_STATE_KEY_PRESENT, state.keyPresent)
+            .putBoolean(PREF_GLASSES_STATE_WRITE_SECURE_GRANTED, state.writeSecureGranted)
+            .putBoolean(PREF_GLASSES_STATE_ACCESSIBILITY_ENABLED, state.accessibilityEnabled)
+            .putInt(PREF_GLASSES_STATE_HELPER_VERSION_CODE, state.helperVersionCode)
+            .apply()
+    }
+
+    fun glassesState(context: Context): GlassesState? {
+        val prefs = context.applicationContext
+            .getSharedPreferences(Constants.PREFS, Context.MODE_PRIVATE)
+        if (!prefs.contains(PREF_GLASSES_STATE_RECEIVED_AT_MS)) return null
+        return GlassesState(
+            armed = prefs.getBoolean(PREF_GLASSES_STATE_ARMED, false),
+            keyPresent = prefs.getBoolean(PREF_GLASSES_STATE_KEY_PRESENT, false),
+            writeSecureGranted = prefs.getBoolean(PREF_GLASSES_STATE_WRITE_SECURE_GRANTED, false),
+            accessibilityEnabled = prefs.getBoolean(PREF_GLASSES_STATE_ACCESSIBILITY_ENABLED, false),
+            helperVersionCode = prefs.getInt(PREF_GLASSES_STATE_HELPER_VERSION_CODE, 0),
+            receivedAtWallClockMs = prefs.getLong(PREF_GLASSES_STATE_RECEIVED_AT_MS, 0L),
         )
     }
 

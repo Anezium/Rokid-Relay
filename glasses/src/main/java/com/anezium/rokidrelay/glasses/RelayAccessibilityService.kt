@@ -110,7 +110,9 @@ class RelayAccessibilityService : AccessibilityService() {
         RelayHudController.addNotificationShownListener(notificationWakeListener)
         RelayHudController.addStateListener(replyWakeListener)
         RelayBridge.start(this)
-        SelfArmController.maybeStart(this, "accessibility_service_connected")
+        SelfArmController.maybeStart(this, "accessibility_service_connected") {
+            RelayBridge.sendSelfArmState(this)
+        }
         showOverlay()
     }
 
@@ -185,6 +187,7 @@ class RelayAccessibilityService : AccessibilityService() {
         RelayHudController.removeStateListener(replyWakeListener)
         releaseReplyWakeLock()
         RelayHudController.refreshAccessibility(this)
+        RelayBridge.sendSelfArmState(this)
         super.onDestroy()
     }
 
