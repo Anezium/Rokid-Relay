@@ -110,6 +110,13 @@ class DiagnosticsPanel(
             appendLine("CXR-L: ${if (snapshot.cxrConnected) "connected" else "disconnected"}")
             appendLine("Glasses BT: ${if (snapshot.glassConnected) "connected" else "waiting"}")
             appendLine("Glasses app: ${snapshot.bootstrapState}")
+            if (snapshot.helperUpdate.displayText.isNotBlank()) {
+                appendLine("Helper update: ${snapshot.helperUpdate.displayText}")
+            }
+            if (snapshot.helperUpdateTrail.isNotEmpty()) {
+                appendLine("Helper update trail:")
+                snapshot.helperUpdateTrail.forEach { event -> appendLine("  $event") }
+            }
             appendLine("Self-arm: ${snapshot.selfArmStatus} key=${snapshot.selfArmKeyPresent}")
             snapshot.selfArmGlassesState?.let { state ->
                 appendLine(

@@ -59,6 +59,18 @@ object Constants {
     const val PREF_NOTIFICATION_OVERLAY_Y_OFFSET_DP = "notification_overlay_y_offset_dp"
     const val PREF_CLIENT_APK_FINGERPRINT = "client_apk_fingerprint"
     const val PREF_CLIENT_NEEDS_FOREGROUND_LAUNCH = "client_needs_foreground_launch"
+    const val PREF_HELPER_UPDATED_AT_MS = "helper_updated_at_ms"
+    const val PREF_HELPER_UPDATE_ATTEMPT_VERSION_CODE = "helper_update_attempt_version_code"
+    const val PREF_HELPER_UPDATE_ATTEMPT_DAY = "helper_update_attempt_day"
+    const val PREF_HELPER_UPDATE_ATTEMPT_COUNT = "helper_update_attempt_count"
+    const val PREF_HELPER_UPDATE_NEXT_RETRY_AT_MS = "helper_update_next_retry_at_ms"
+    const val PREF_HELPER_UPDATE_LAST_FAILURE_REASON = "helper_update_last_failure_reason"
+    const val PREF_HELPER_UPDATE_VERIFICATION_REQUIRED_VERSION_CODE =
+        "helper_update_verification_required_version_code"
+    const val PREF_HELPER_UPDATE_VERIFICATION_STARTED_AT_MS =
+        "helper_update_verification_started_at_ms"
+    const val PREF_HELPER_LEGACY_VERIFICATION_LOGGED_VERSION_CODE =
+        "helper_legacy_verification_logged_version_code"
     const val PREF_SELF_ARM_PROVISIONED = "self_arm_provisioned"
     const val PREF_SELF_ARM_KEY_PRESENT = "self_arm_key_present"
     const val PREF_SELF_ARM_DISABLE_PENDING = "self_arm_disable_pending"

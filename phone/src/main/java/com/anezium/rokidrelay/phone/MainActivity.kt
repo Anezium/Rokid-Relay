@@ -604,6 +604,7 @@ class MainActivity : Activity() {
         actionLabel: String,
         actionTone: ButtonTone,
         onClick: () -> Unit,
+        valueMaxLines: Int = 1,
     ): LinearLayout =
         LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -628,14 +629,16 @@ class MainActivity : Activity() {
                     textSize = 12f
                     includeFontPadding = false
                     setTextColor(statusColor(tone))
-                    maxLines = 1
+                    maxLines = valueMaxLines
                     ellipsize = TextUtils.TruncateAt.END
                 }, matchWrap(top = 4))
             }, LinearLayout.LayoutParams(0, wrap(), 1f).apply {
                 leftMargin = dp(10)
                 rightMargin = dp(10)
             })
-            addView(smallButton(actionLabel, actionTone, onClick), LinearLayout.LayoutParams(dp(112), dp(38)))
+            if (actionLabel.isNotBlank()) {
+                addView(smallButton(actionLabel, actionTone, onClick), LinearLayout.LayoutParams(dp(112), dp(38)))
+            }
         }
 
     private fun selfArmPairingCodeRow(): LinearLayout =
@@ -1192,6 +1195,17 @@ class MainActivity : Activity() {
                 actionTone = ButtonTone.Secondary,
                 onClick = { openBatterySettings() },
             ), matchWrap(top = 8))
+            if (snap.helperUpdate.displayText.isNotBlank()) {
+                setupRows.addView(setupRow(
+                    title = "Glasses helper",
+                    value = snap.helperUpdate.displayText,
+                    tone = snap.helperUpdate.phase.toStatusTone(),
+                    actionLabel = "",
+                    actionTone = ButtonTone.Secondary,
+                    onClick = {},
+                    valueMaxLines = 2,
+                ), matchWrap(top = 8))
+            }
             val relayEnabled = RelayStarter.isRelayEnabled(this)
             val relayRunning = RelayService.running
             val relayOperational = relayRunning &&
@@ -1275,7 +1289,11 @@ class MainActivity : Activity() {
         }
 
         if (::noticeText.isInitialized) {
+            val helperUpdateInProgress =
+                snap.helperUpdate.phase == GlassesHelperUpdatePhase.UPDATING ||
+                    snap.helperUpdate.phase == GlassesHelperUpdatePhase.VERIFYING
             noticeText.text = when {
+                helperUpdateInProgress -> snap.helperUpdate.displayText
                 !hiRokid -> "Install or expose Hi Rokid Global first."
                 !authSaved -> "Authorize once, then the relay can start automatically."
                 RelayStarter.isRelayEnabled(this) && !notifications ->
@@ -1303,6 +1321,7 @@ class MainActivity : Activity() {
             }
             noticeText.setTextColor(
                 when {
+                    helperUpdateInProgress -> COLOR_AMBER
                     RelayStarter.isRelayEnabled(this) && !notifications -> COLOR_AMBER
                     hiRokid && authSaved && notifications && sttReady -> COLOR_PHOSPHOR
                     else -> COLOR_MUTED
@@ -2008,10 +2027,25 @@ class MainActivity : Activity() {
             SelfArmRecoveryTone.Neutral -> StatusTone.Neutral
         }
 
+    private fun GlassesHelperUpdatePhase.toStatusTone(): StatusTone =
+        when (this) {
+            GlassesHelperUpdatePhase.UP_TO_DATE,
+            GlassesHelperUpdatePhase.UPDATED,
+            -> StatusTone.Ready
+            GlassesHelperUpdatePhase.UPDATE_AVAILABLE,
+            GlassesHelperUpdatePhase.WAITING_FOR_WIFI,
+            GlassesHelperUpdatePhase.UPDATING,
+            GlassesHelperUpdatePhase.VERIFYING,
+            -> StatusTone.Waiting
+            GlassesHelperUpdatePhase.FAILED -> StatusTone.Error
+            GlassesHelperUpdatePhase.CHECKING -> StatusTone.Neutral
+        }
+
     private fun statusColor(tone: StatusTone): Int =
         when (tone) {
             StatusTone.Ready -> COLOR_PHOSPHOR
             StatusTone.Waiting -> COLOR_AMBER
+            StatusTone.Error -> COLOR_DANGER
             StatusTone.Neutral -> COLOR_MUTED
         }
 
@@ -2358,6 +2392,7 @@ class MainActivity : Activity() {
     private enum class StatusTone {
         Ready,
         Waiting,
+        Error,
         Neutral,
     }
 

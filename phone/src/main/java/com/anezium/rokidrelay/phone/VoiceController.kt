@@ -26,7 +26,7 @@ object VoiceController {
     private var activeNotificationId: String = ""
     private var activeLink: CXRLink? = null
     private var appContext: Context? = null
-    private var voiceActive = false
+    @Volatile private var voiceActive = false
     private var activeCapture: CxrBufferedAudioCapture? = null
     private var activeEngine: CompletedAudioSpeechToTextEngine? = null
     private var activeRealtimeSession: RealtimeSpeechToTextSession? = null
@@ -34,6 +34,8 @@ object VoiceController {
     private var pendingReply: PendingVoiceReply? = null
     private var reviewRunnable: Runnable? = null
     private var lastStartAtMs = 0L
+
+    fun isActive(): Boolean = voiceActive
 
     fun start(context: Context, link: CXRLink, notificationId: String) {
         main.post {
@@ -78,6 +80,7 @@ object VoiceController {
             activeLink = link
             activeNotificationId = notificationId
             voiceActive = true
+            RelayBridge.onVoiceSessionStarted()
 
             val routedToGlasses = runCatching { link.setCommunicationDevice() }.getOrDefault(false)
             // Keep the Hi Rokid AI assistant from grabbing the shared glasses audio stream mid-capture.
@@ -483,6 +486,7 @@ object VoiceController {
         val context = appContext
         clearReviewCountdown()
         voiceActive = false
+        RelayBridge.onVoiceSessionIdle()
         activeNotificationId = ""
         val ok = if (context != null) ReplyRepository.sendReply(context, pending.notificationId, pending.text) else false
         RelayBridge.recordOutgoingReply(pending.text, ok)
@@ -511,7 +515,7 @@ object VoiceController {
 
     private fun retryOnMain(context: Context, link: CXRLink, notificationId: String) {
         clearReviewCountdown()
-        finishVoiceCapture(sendIdle = false, cancelListening = true)
+        finishVoiceCapture(sendIdle = false, cancelListening = true, notifyHelperIdle = false)
         lastStartAtMs = 0L
         start(context, link, notificationId)
     }
@@ -611,9 +615,14 @@ object VoiceController {
         finishVoiceCapture(sendIdle = sendIdle, cancelListening = true)
     }
 
-    private fun finishVoiceCapture(sendIdle: Boolean, cancelListening: Boolean) {
+    private fun finishVoiceCapture(
+        sendIdle: Boolean,
+        cancelListening: Boolean,
+        notifyHelperIdle: Boolean = true,
+    ) {
         clearReviewCountdown()
         voiceActive = false
+        if (notifyHelperIdle) RelayBridge.onVoiceSessionIdle()
         if (cancelListening) {
             activeEngine?.cancel()
             activeRecognizer?.cancel()
