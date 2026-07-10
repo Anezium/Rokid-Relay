@@ -389,7 +389,7 @@ class RelayHudView(
         }
         messageLabel.visibility = GONE
         val sleepingHint = connection == "sleeping"
-        hintLabel.text = if (sleepingHint) "Replies resume on next notification" else ""
+        hintLabel.text = if (sleepingHint) "Replying wakes the phone" else ""
         hintLabel.visibility = if (sleepingHint) VISIBLE else GONE
         hintLabel.alpha = 1f
         hintLabel.translationY = 0f
@@ -422,7 +422,7 @@ class RelayHudView(
         if (voiceState != "idle" || resultLine.isNotBlank()) return
         val hint = transientLine.ifBlank {
             if (connection == "sleeping") {
-                "Replies resume on next notification"
+                "Replying wakes the phone"
             } else if (pageCount > 1) {
                 "Page ${pageIndex + 1}/${pageCount}"
             } else {

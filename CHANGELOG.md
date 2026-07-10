@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.16 - 2026-07-10
+
+- Fixed background voice replies with the Android CXR engine on Android 14+. Android only grants microphone foreground rights while an app screen is visible (companion presence, wake allowlists, and overlay permission were all measured as refused, and Google's recognizer rejects sessions without them even for injected glasses audio), so Relay now acquires the rights while the app is open and keeps its armed service alive instead of stopping it when idle. The CXR-L link still sleeps after 120 seconds and stays available to other apps. After a phone reboot the notification asks for one visit to the app: "Open Rokid Relay once to enable glasses voice replies".
+- Added automatic glasses-helper updates with a visible state machine (`GlassesHelperUpdater`): version comparison against what the glasses actually report, background install as soon as the link is ready, explicit waiting states for Wi-Fi-radio-off and recovery-not-armed, verification by the glasses-reported versionCode, and a capped 1/5/30-minute retry ladder. Previously a background-only user never received helper updates at all.
+- Made self-arm recovery fully silent: a ContentObserver in the accessibility service repairs a settings-level disable within the same second, and neither the in-app repair nor the shell watchdog launches any activity anymore (a settings write alone revives the helper, measured on hardware). The watchdog polls every 60 seconds instead of 2, and rotates its log at 64 KB.
+- Reworded the glasses sleeping-inbox hint to "Replying wakes the phone"; the old "Replies resume on next notification" had been wrong since the BLE wake bridge shipped.
+- Bumped the phone app to `0.1.16` / `versionCode 44` and the bundled glasses helper to `0.1.11` / `versionCode 26`.
+
 ## v0.1.15 - 2026-07-08
 
 Stable release of the 0.1.15 line. Everything from previews 1–27 is included; see `docs/releases/` for the per-preview details.

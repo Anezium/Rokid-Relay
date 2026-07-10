@@ -10,7 +10,7 @@ android {
         applicationId = "com.anezium.rokidrelay.glasses"
         minSdk = 31
         targetSdk = 32
-        versionCode = 25
+        versionCode = 26
         versionName = "0.1.11"
     }
 
