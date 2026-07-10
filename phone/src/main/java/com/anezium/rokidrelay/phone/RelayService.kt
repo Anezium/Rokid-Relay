@@ -32,6 +32,10 @@ class RelayService : Service() {
         super.onCreate()
         instance = this
         running = true
+        microphoneForegroundActive = false
+        microphoneForegroundRequested = false
+        microphoneForegroundHeldForAwakeWindow = false
+        lastMicrophoneForegroundError = ""
         createChannel()
     }
 
@@ -42,6 +46,7 @@ class RelayService : Service() {
                 RelayStarter.setRelayEnabled(this, false)
                 BleWakeServer.stop()
                 microphoneForegroundRequested = false
+                microphoneForegroundHeldForAwakeWindow = false
                 cancelIdleStop()
                 RelayBridge.disableSelfArmBestEffort(this) {
                     RelayBridge.stop()
@@ -109,6 +114,7 @@ class RelayService : Service() {
         running = false
         microphoneForegroundActive = false
         microphoneForegroundRequested = false
+        microphoneForegroundHeldForAwakeWindow = false
         lastMicrophoneForegroundError = "Relay service stopped"
         if (instance === this) instance = null
         super.onDestroy()
@@ -119,7 +125,7 @@ class RelayService : Service() {
     private fun startForegroundCompat() {
         val notification = buildNotification()
         val requestMicrophone = shouldRequestMicrophoneForeground()
-        lastMicrophoneForegroundError = ""
+        if (requestMicrophone && microphoneForegroundActive) return
         runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val microphoneType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && requestMicrophone) {
@@ -133,18 +139,20 @@ class RelayService : Service() {
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or microphoneType,
                 )
                 microphoneForegroundActive = microphoneType != 0
-                if (requestMicrophone && !microphoneForegroundActive) {
+                if (microphoneForegroundActive) {
+                    lastMicrophoneForegroundError = ""
+                } else if (requestMicrophone) {
                     lastMicrophoneForegroundError = "Microphone foreground type unavailable on this Android version"
                 }
             } else {
                 startForeground(NOTIFICATION_ID, notification)
                 microphoneForegroundActive = requestMicrophone
+                if (microphoneForegroundActive) lastMicrophoneForegroundError = ""
             }
         }.onFailure {
             microphoneForegroundActive = false
-            lastMicrophoneForegroundError = it.message?.takeIf { message -> message.isNotBlank() }
-                ?: it::class.java.simpleName
-            Log.w(TAG, "foreground start failed: $lastMicrophoneForegroundError")
+            lastMicrophoneForegroundError = microphoneForegroundFailureDetail(it)
+            Log.w(TAG, "foreground start failed: $lastMicrophoneForegroundError", it)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && requestMicrophone) {
                 runCatching {
                     startForeground(
@@ -160,7 +168,8 @@ class RelayService : Service() {
     }
 
     private fun shouldRequestMicrophoneForeground(): Boolean {
-        if (!microphoneForegroundRequested) return false
+        if (microphoneForegroundHeldForAwakeWindow && microphoneForegroundActive) return true
+        if (!microphoneForegroundRequested && !microphoneForegroundHeldForAwakeWindow) return false
         val selected = SpeechToTextSettingsStore(this).selectedEngine()
         return selected.requiresMicrophonePermission &&
             checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
@@ -219,6 +228,7 @@ class RelayService : Service() {
 
         @Volatile private var instance: RelayService? = null
         @Volatile private var microphoneForegroundRequested: Boolean = false
+        @Volatile private var microphoneForegroundHeldForAwakeWindow: Boolean = false
 
         private const val TAG = "RelayService"
         private const val CHANNEL_ID = "rokid_relay"
@@ -228,7 +238,17 @@ class RelayService : Service() {
 
         fun setMicrophoneForegroundRequested(requested: Boolean): Boolean {
             microphoneForegroundRequested = requested
+            if (!requested && microphoneForegroundHeldForAwakeWindow) {
+                return microphoneForegroundActive
+            }
             return refreshForeground()
+        }
+
+        fun promoteMicrophoneForegroundForAwakeWindow(): Boolean {
+            microphoneForegroundHeldForAwakeWindow = true
+            val promoted = refreshForeground()
+            if (!promoted) microphoneForegroundHeldForAwakeWindow = false
+            return promoted
         }
 
         fun scheduleIdleStop(delayMs: Long = IDLE_STOP_DELAY_MS) {

@@ -45,9 +45,29 @@ class RelayCompanionService : CompanionDeviceService() {
 
     private fun glassesPresent(source: String) {
         Log.i(TAG, "glasses present: $source")
-        if (RelayStarter.isRelayEnabled(this)) {
+        val relayEnabled = RelayStarter.isRelayEnabled(this)
+        if (relayEnabled) {
             BleWakeServer.ensureStarted(this)
             RelayBridge.setStatus("glasses present: relay armed")
+        }
+        val selectedEngine = SpeechToTextSettingsStore(this).selectedEngine()
+        if (
+            shouldPromoteMicrophoneForegroundOnPresence(
+                relayEnabled = relayEnabled,
+                relayServiceRunning = RelayService.running,
+                selectedEngine = selectedEngine,
+            )
+        ) {
+            val promoted = RelayService.promoteMicrophoneForegroundForAwakeWindow()
+            if (promoted) {
+                Log.i(TAG, "microphone foreground acquired from companion presence")
+            } else {
+                Log.w(
+                    TAG,
+                    "microphone foreground unavailable from companion presence: " +
+                        RelayService.lastMicrophoneForegroundError.ifBlank { "unknown" },
+                )
+            }
         }
     }
 

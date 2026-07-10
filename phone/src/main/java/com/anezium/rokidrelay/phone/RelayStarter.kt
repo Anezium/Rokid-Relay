@@ -22,7 +22,11 @@ object RelayStarter {
             RelayBridge.setStatus("relay not started: missing auth token")
             return false
         }
-        return start(appContext, token, reason, persistEnabled = userInitiated)
+        val started = start(appContext, token, reason, persistEnabled = userInitiated)
+        if (started && !userInitiated) {
+            CompanionDeviceCoordinator.startObserving(appContext)
+        }
+        return started
     }
 
     fun arm(context: Context) {
@@ -56,7 +60,9 @@ object RelayStarter {
             RelayBridge.setStatus("notification wake skipped: missing auth token")
             return false
         }
-        return start(appContext, token, START_REASON_NOTIFICATION, persistEnabled = false)
+        val started = start(appContext, token, START_REASON_NOTIFICATION, persistEnabled = false)
+        if (started) CompanionDeviceCoordinator.startObserving(appContext)
+        return started
     }
 
     fun wakeForBleReply(context: Context, notificationId: String): Boolean {
@@ -83,6 +89,7 @@ object RelayStarter {
             } else {
                 appContext.startService(intent)
             }
+            CompanionDeviceCoordinator.startObserving(appContext)
             true
         }.getOrElse {
             Log.w(TAG, "BLE wake start failed: ${it.message}")
