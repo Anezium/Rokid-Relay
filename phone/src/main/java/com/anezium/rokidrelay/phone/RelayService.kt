@@ -40,7 +40,33 @@ class RelayService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val startReason = intent?.getStringExtra(Constants.EXTRA_START_REASON).orEmpty()
+        val initialWakeMicrophoneRequested =
+            intent?.action == Constants.ACTION_START &&
+                shouldRequestMicrophoneForegroundOnInitialWake(
+                    startReason = startReason,
+                    selectedEngine = SpeechToTextSettingsStore(this).selectedEngine(),
+                    recordAudioGranted =
+                        checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED,
+                )
+        if (initialWakeMicrophoneRequested) {
+            // This must be set before the first promotion made for the wake start. The system's
+            // temporary background-start allowlist may also satisfy microphone while-in-use
+            // eligibility here, while a later presence/session re-promotion may not.
+            microphoneForegroundHeldForAwakeWindow = true
+        }
         startForegroundCompat()
+        if (initialWakeMicrophoneRequested) {
+            val granted = microphoneForegroundActive
+            val detail = if (granted) {
+                "reason=$startReason type=connectedDevice|microphone"
+            } else {
+                "${lastMicrophoneForegroundError.ifBlank { "unknown" }}; fallback=connectedDevice"
+            }
+            val message = initialWakeMicrophonePromotionLogLine(granted, detail)
+            if (granted) Log.i(TAG, message) else Log.w(TAG, message)
+            if (!granted) microphoneForegroundHeldForAwakeWindow = false
+        }
         when (intent?.action) {
             Constants.ACTION_STOP -> {
                 RelayStarter.setRelayEnabled(this, false)
@@ -88,7 +114,7 @@ class RelayService : Service() {
                 val token = intent?.getStringExtra(Constants.EXTRA_TOKEN)
                     ?: getSharedPreferences(Constants.PREFS, MODE_PRIVATE)
                         .getString(Constants.PREF_AUTH_TOKEN, null)
-                val reason = intent?.getStringExtra(Constants.EXTRA_START_REASON).orEmpty()
+                val reason = startReason
                 val wakeNotificationId = intent
                     ?.getStringExtra(Constants.EXTRA_WAKE_NOTIFICATION_ID)
                     .orEmpty()
