@@ -7,7 +7,7 @@ object Constants {
         "com.anezium.rokidrelay.glasses/com.anezium.rokidrelay.glasses.RelayAccessibilityService"
     const val SELF_ARM_WATCHDOG_ASSET = "rokid-relay-a11y-watchdog.sh"
     const val SELF_ARM_WATCHDOG_NAME = "rokid-relay-a11y-watchdog"
-    const val SELF_ARM_WATCHDOG_VERSION = "2026-07-08.1"
+    const val SELF_ARM_WATCHDOG_VERSION = "2026-07-10.1"
     const val SELF_ARM_WATCHDOG_REMOTE_PATH = "/data/local/tmp/rokid-relay-a11y-watchdog.sh"
 
     const val KEY_EVENT = "rokid_relay.event"

@@ -2,10 +2,8 @@ package com.anezium.rokidrelay.glasses
 
 import android.Manifest
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
-import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import org.json.JSONObject
@@ -17,7 +15,6 @@ import java.util.Base64
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicLong
 
 object SelfArmController {
     private const val TAG = "RokidRelaySelfArm"
@@ -38,9 +35,7 @@ object SelfArmController {
     private const val INSTALL_SENTINEL = "ROKID_RELAY_INSTALL_RESULT"
     private const val DISABLE_SENTINEL = "ROKID_RELAY_DISABLE_RESULT"
     private const val WATCHDOG_PIDFILE = "/data/local/tmp/rokid-relay-a11y-watchdog.pid"
-    private const val DIRECT_REPAIR_RELAUNCH_INTERVAL_MS = 30_000L
     private val selfArmRunning = AtomicBoolean(false)
-    private val lastDirectRepairRelaunchMs = AtomicLong(0L)
 
     data class ProvisionResult(
         val accepted: Boolean,
@@ -194,6 +189,10 @@ object SelfArmController {
         if (Constants.ACCESSIBILITY_SERVICE in parts) return clean
         return (parts + Constants.ACCESSIBILITY_SERVICE).joinToString(":")
     }
+
+    internal fun accessibilityRepairNeeded(current: String?, accessibilityEnabled: Int): Boolean =
+        accessibilityEnabled != 1 ||
+            current.orEmpty().split(':').none { it == Constants.ACCESSIBILITY_SERVICE }
 
     internal fun buildInstallCommand(script: String, action: String = "restart"): String =
         buildString {
@@ -419,37 +418,14 @@ object SelfArmController {
             if (enabledChanged) {
                 Settings.Secure.putInt(resolver, Settings.Secure.ACCESSIBILITY_ENABLED, 1)
             }
-            if (servicesChanged || enabledChanged) {
-                if (markDirectRepairRelaunchAllowed()) {
-                    val launch = Intent(context, MainActivity::class.java)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                    context.startActivity(launch)
-                    Log.i(
-                        TAG,
-                        "direct repair applied servicesChanged=$servicesChanged enabledChanged=$enabledChanged relaunched=true",
-                    )
-                } else {
-                    Log.i(
-                        TAG,
-                        "direct repair applied servicesChanged=$servicesChanged enabledChanged=$enabledChanged relaunched=false",
-                    )
-                }
-            } else {
-                Log.i(TAG, "direct repair already armed; relaunch skipped")
-            }
+            Log.i(
+                TAG,
+                "direct repair checked servicesChanged=$servicesChanged enabledChanged=$enabledChanged",
+            )
             true
         }.getOrElse {
             Log.w(TAG, "direct repair failed: ${it.message}")
             false
-        }
-    }
-
-    private fun markDirectRepairRelaunchAllowed(): Boolean {
-        while (true) {
-            val now = SystemClock.elapsedRealtime()
-            val last = lastDirectRepairRelaunchMs.get()
-            if (last != 0L && now - last < DIRECT_REPAIR_RELAUNCH_INTERVAL_MS) return false
-            if (lastDirectRepairRelaunchMs.compareAndSet(last, now)) return true
         }
     }
 

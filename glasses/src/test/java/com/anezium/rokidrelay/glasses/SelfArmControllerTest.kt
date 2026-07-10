@@ -34,6 +34,19 @@ class SelfArmControllerTest {
     }
 
     @Test
+    fun accessibilityRepairIsOnlyNeededWhenRelaySettingsAreBroken() {
+        assertFalse(
+            SelfArmController.accessibilityRepairNeeded(Constants.ACCESSIBILITY_SERVICE, 1),
+        )
+        assertTrue(
+            SelfArmController.accessibilityRepairNeeded("other.service/.A", 1),
+        )
+        assertTrue(
+            SelfArmController.accessibilityRepairNeeded(Constants.ACCESSIBILITY_SERVICE, 0),
+        )
+    }
+
+    @Test
     fun installCommandDeploysWatchdogAndConfiguresLoopbackAdb() {
         val command = SelfArmController.buildInstallCommand("#!/system/bin/sh\necho ok\n", "start")
 

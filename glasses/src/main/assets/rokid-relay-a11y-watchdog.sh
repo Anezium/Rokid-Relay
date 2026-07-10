@@ -2,20 +2,34 @@
 
 PKG="com.anezium.rokidrelay.glasses"
 SVC="com.anezium.rokidrelay.glasses/com.anezium.rokidrelay.glasses.RelayAccessibilityService"
-MAIN="$PKG/.MainActivity"
 NAME="rokid-relay-a11y-watchdog"
 BASE="/data/local/tmp"
 PIDFILE="$BASE/$NAME.pid"
 LOGFILE="$BASE/$NAME.log"
 HEARTBEAT="$BASE/$NAME.heartbeat"
 VERSIONFILE="$BASE/$NAME.version"
-VERSION="2026-07-08.1"
-INTERVAL="${INTERVAL:-2}"
-START_BACKOFF_SECONDS=30
-LAST_START_EPOCH=0
-HOME_AFTER_REPAIR="${HOME_AFTER_REPAIR:-1}"
+VERSION="2026-07-10.1"
+INTERVAL="${INTERVAL:-60}"
+
+rotate_log_if_needed() {
+  if [ ! -f "$LOGFILE" ]; then
+    return
+  fi
+  log_size="$(wc -c < "$LOGFILE" 2>/dev/null | tr -d '[:space:]')"
+  case "$log_size" in
+    ""|*[!0-9]*) log_size=0 ;;
+  esac
+  if [ "$log_size" -gt 65536 ]; then
+    log_tmp="$LOGFILE.tmp.$$"
+    if tail -n 50 "$LOGFILE" > "$log_tmp" 2>/dev/null; then
+      mv "$log_tmp" "$LOGFILE"
+    fi
+    rm -f "$log_tmp"
+  fi
+}
 
 log_line() {
+  rotate_log_if_needed
   echo "$(date '+%Y-%m-%dT%H:%M:%S%z') $*" >> "$LOGFILE"
 }
 
@@ -55,9 +69,28 @@ service_present() {
   esac
 }
 
+services_without_relay() {
+  enabled="$1"
+  without_relay=""
+  old_ifs="$IFS"
+  IFS=':'
+  for service in $enabled; do
+    if [ -n "$service" ] && [ "$service" != "$SVC" ]; then
+      if [ -z "$without_relay" ]; then
+        without_relay="$service"
+      else
+        without_relay="$without_relay:$service"
+      fi
+    fi
+  done
+  IFS="$old_ifs"
+  echo "$without_relay"
+}
+
 repair_once() {
   accessibility_enabled="$(settings get secure accessibility_enabled 2>/dev/null)"
   enabled_services="$(settings get secure enabled_accessibility_services 2>/dev/null)"
+  pid_before="$(app_pid)"
   case "$enabled_services" in
     ""|"null")
       next_services="$SVC"
@@ -72,25 +105,26 @@ repair_once() {
   esac
 
   if [ "$enabled_services" != "$next_services" ]; then
+    rotate_log_if_needed
     settings put secure enabled_accessibility_services "$next_services" 2>>"$LOGFILE"
   fi
   if [ "$accessibility_enabled" != "1" ]; then
+    rotate_log_if_needed
     settings put secure accessibility_enabled 1 2>>"$LOGFILE"
   fi
 
-  now="$(date '+%s')"
-  if [ $((now - LAST_START_EPOCH)) -ge "$START_BACKOFF_SECONDS" ]; then
-    am start -n "$MAIN" --activity-clear-top >/dev/null 2>>"$LOGFILE"
-    LAST_START_EPOCH="$now"
-    if [ "$HOME_AFTER_REPAIR" = "1" ]; then
-      input keyevent 3 >/dev/null 2>>"$LOGFILE"
-    fi
-    start_requested=1
-  else
-    start_requested=0
+  if [ "$accessibility_enabled" = "1" ] && service_present "$enabled_services" && [ -z "$pid_before" ]; then
+    without_relay="$(services_without_relay "$enabled_services")"
+    rotate_log_if_needed
+    settings put secure enabled_accessibility_services "$without_relay" 2>>"$LOGFILE"
+    rotate_log_if_needed
+    settings put secure enabled_accessibility_services "$enabled_services" 2>>"$LOGFILE"
+    log_line "rebind requested services=${enabled_services:-empty} appPid=$(app_pid)"
   fi
+
+  now="$(date '+%s')"
   echo "$now" > "$HEARTBEAT"
-  log_line "repair requested a11y=$accessibility_enabled services=${enabled_services:-empty} start=$start_requested appPid=$(app_pid)"
+  log_line "repair requested a11y=$accessibility_enabled services=${enabled_services:-empty} appPid=$(app_pid)"
 }
 
 loop_forever() {

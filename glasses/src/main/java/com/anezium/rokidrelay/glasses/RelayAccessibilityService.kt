@@ -6,6 +6,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.database.ContentObserver
 import android.graphics.PixelFormat
 import android.media.AudioManager
 import android.os.Build
@@ -13,6 +14,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
+import android.provider.Settings
 import android.util.Log
 import android.view.Gravity
 import android.view.KeyEvent
@@ -65,6 +67,12 @@ class RelayAccessibilityService : AccessibilityService() {
     private val grabbedKeys = HashSet<Int>()
     private val inputInterpreter = RelayInputInterpreter()
     private var wirelessDebuggingAutomator: SelfArmWirelessDebuggingAutomator? = null
+    private var selfArmSettingsObserverRegistered = false
+    private val selfArmSettingsObserver = object : ContentObserver(main) {
+        override fun onChange(selfChange: Boolean) {
+            maybeRepairSelfArmSettings()
+        }
+    }
     private val singleTapRunnable = Runnable {
         executeInputActions(
             inputInterpreter.handleSingleTapTimer(RelayHudController.inputSnapshot()).actions,
@@ -97,6 +105,7 @@ class RelayAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         activeService = this
+        registerSelfArmSettingsObserver()
         serviceInfo = serviceInfo.apply {
             flags = flags or
                 AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS or
@@ -174,6 +183,7 @@ class RelayAccessibilityService : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        unregisterSelfArmSettingsObserver()
         hideOverlay()
         wirelessDebuggingAutomator?.stop()
         wirelessDebuggingAutomator = null
@@ -189,6 +199,64 @@ class RelayAccessibilityService : AccessibilityService() {
         RelayHudController.refreshAccessibility(this)
         RelayBridge.sendSelfArmState(this)
         super.onDestroy()
+    }
+
+    override fun onUnbind(intent: Intent?): Boolean {
+        unregisterSelfArmSettingsObserver()
+        return super.onUnbind(intent)
+    }
+
+    private fun registerSelfArmSettingsObserver() {
+        if (selfArmSettingsObserverRegistered) return
+        val resolver = applicationContext.contentResolver
+        runCatching {
+            resolver.registerContentObserver(
+                Settings.Secure.getUriFor(Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES),
+                false,
+                selfArmSettingsObserver,
+            )
+            resolver.registerContentObserver(
+                Settings.Secure.getUriFor(Settings.Secure.ACCESSIBILITY_ENABLED),
+                false,
+                selfArmSettingsObserver,
+            )
+            selfArmSettingsObserverRegistered = true
+        }.onFailure {
+            runCatching { resolver.unregisterContentObserver(selfArmSettingsObserver) }
+            Log.w(TAG, "Self-arm settings observer registration failed: ${it.message}")
+        }
+    }
+
+    private fun unregisterSelfArmSettingsObserver() {
+        if (!selfArmSettingsObserverRegistered) return
+        selfArmSettingsObserverRegistered = false
+        runCatching {
+            applicationContext.contentResolver.unregisterContentObserver(selfArmSettingsObserver)
+        }.onFailure {
+            Log.w(TAG, "Self-arm settings observer unregistration failed: ${it.message}")
+        }
+    }
+
+    private fun maybeRepairSelfArmSettings() {
+        val appContext = applicationContext
+        if (!SelfArmController.isArmed(appContext)) return
+        runCatching {
+            val resolver = appContext.contentResolver
+            val enabledServices = Settings.Secure.getString(
+                resolver,
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+            )
+            val accessibilityEnabled = Settings.Secure.getInt(
+                resolver,
+                Settings.Secure.ACCESSIBILITY_ENABLED,
+                0,
+            )
+            if (SelfArmController.accessibilityRepairNeeded(enabledServices, accessibilityEnabled)) {
+                SelfArmController.maybeStart(appContext, "settings_changed")
+            }
+        }.onFailure {
+            Log.w(TAG, "Self-arm settings observer check failed: ${it.message}")
+        }
     }
 
     private fun onTwoFinger(direction: RelayDirection) {
