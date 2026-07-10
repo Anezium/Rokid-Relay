@@ -142,13 +142,11 @@ class MainActivity : Activity() {
                 BleWakeServer.ensureStarted(this)
                 maybeAutoPrepareSelfArmRecovery()
             }
-            if (RelayService.running) {
-                RelayService.refreshForeground()
-                handler.postDelayed({
-                    RelayService.refreshForeground()
-                    renderStatus()
-                }, FOREGROUND_REFRESH_DELAY_MS)
-            }
+            syncPersistentMicrophoneForegroundWhileVisible()
+            handler.postDelayed({
+                syncPersistentMicrophoneForegroundWhileVisible()
+                renderStatus()
+            }, FOREGROUND_REFRESH_DELAY_MS)
         }
         renderStatus()
         handler.post(pollStatus)
@@ -219,7 +217,12 @@ class MainActivity : Activity() {
                         }
                     }
                     RelayService.running -> {
-                        RelayStarter.start(this, result.token, "authorization")
+                        RelayStarter.start(
+                            this,
+                            result.token,
+                            "authorization",
+                            foregroundMicrophoneAcquisition = true,
+                        )
                         "Hi Rokid authorized"
                     }
                     else -> "Hi Rokid authorized"
@@ -1126,6 +1129,14 @@ class MainActivity : Activity() {
         val azureRegion = stt.azureRegion()
         val sttReady = sttReady(selectedEngine, stt)
         val micPermissionGranted = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        val relayEnabled = RelayStarter.isRelayEnabled(this)
+        val relayRunning = RelayService.running
+        val microphoneArmHint = microphoneForegroundArmHint(
+            relayEnabled = relayEnabled,
+            selectedEngine = selectedEngine,
+            recordAudioGranted = micPermissionGranted,
+            microphoneForegroundActive = RelayService.microphoneForegroundActive,
+        )
         val companionLinked = CompanionDeviceCoordinator.hasAssociation(this)
         val androidCxrTooOld = selectedEngine == SpeechToTextEngine.ANDROID_CXR &&
             Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
@@ -1206,8 +1217,6 @@ class MainActivity : Activity() {
                     valueMaxLines = 2,
                 ), matchWrap(top = 8))
             }
-            val relayEnabled = RelayStarter.isRelayEnabled(this)
-            val relayRunning = RelayService.running
             val relayOperational = relayRunning &&
                 snap.cxrConnected &&
                 snap.glassConnected &&
@@ -1250,6 +1259,7 @@ class MainActivity : Activity() {
             setupRows.addView(setupRow(
                 title = "Relay service",
                 value = when {
+                    microphoneArmHint != null -> microphoneArmHint
                     relayNotificationAccessMissing -> "Armed, notification access missing"
                     relayOperational -> "Operational"
                     relayRunning && snap.cxrConnected && snap.glassConnected -> "Connected, preparing glasses app"
@@ -1272,6 +1282,7 @@ class MainActivity : Activity() {
                     }
                     renderStatus()
                 },
+                valueMaxLines = if (microphoneArmHint == null) 1 else 2,
             ), matchWrap(top = 8))
             if (relayRunning || relayEnabled) {
                 setupRows.addView(setupRow(
@@ -2107,7 +2118,11 @@ class MainActivity : Activity() {
 
     private fun armRelayAfterSetupReady(): Boolean {
         if (speechSetupBlocker() != null) return false
-        RelayStarter.armAndPrepare(this, RelayStarter.START_REASON_MANUAL)
+        RelayStarter.armAndPrepare(
+            this,
+            RelayStarter.START_REASON_MANUAL,
+            foregroundMicrophoneAcquisition = true,
+        )
         CompanionDeviceCoordinator.startObserving(this)
         BleWakeServer.ensureStarted(this)
         return true
@@ -2169,7 +2184,7 @@ class MainActivity : Activity() {
             requestHiRokidAuthorization(auto = false, reason = RelayStarter.START_REASON_MANUAL)
             return false
         }
-        val started = RelayStarter.relaunch(this)
+        val started = RelayStarter.relaunch(this, foregroundMicrophoneAcquisition = true)
         if (started) {
             CompanionDeviceCoordinator.startObserving(this)
             BleWakeServer.ensureStarted(this)
@@ -2192,7 +2207,13 @@ class MainActivity : Activity() {
 
     private fun prepareSelfArmRecoveryLink(): Boolean {
         Log.i(TAG_SELF_ARM, "starting self-arm provisioning link")
-        if (!RelayStarter.armAndPrepare(this, RelayStarter.START_REASON_SELF_ARM)) {
+        if (
+            !RelayStarter.armAndPrepare(
+                this,
+                RelayStarter.START_REASON_SELF_ARM,
+                foregroundMicrophoneAcquisition = true,
+            )
+        ) {
             Log.w(TAG_SELF_ARM, "self-arm provisioning link could not start")
             return false
         }
@@ -2221,10 +2242,33 @@ class MainActivity : Activity() {
     }
 
     private fun syncSettingsAfterUserChange() {
+        syncPersistentMicrophoneForegroundWhileVisible()
         if (RelayService.running) {
             RelayBridge.sendSettings()
         } else if (RelayStarter.isRelayEnabled(this)) {
             RelayBridge.setStatus("settings saved: will sync on notification wake")
+        }
+    }
+
+    private fun syncPersistentMicrophoneForegroundWhileVisible() {
+        val relayEnabled = RelayStarter.isRelayEnabled(this)
+        val selectedEngine = SpeechToTextSettingsStore(this).selectedEngine()
+        val recordAudioGranted =
+            checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        val requested = isPersistentMicrophoneForegroundEligible(
+            relayEnabled = relayEnabled,
+            selectedEngine = selectedEngine,
+            recordAudioGranted = recordAudioGranted,
+        )
+        when {
+            RelayService.running ->
+                RelayService.setPersistentMicrophoneForegroundRequested(requested)
+            requested ->
+                RelayStarter.armAndPrepare(
+                    this,
+                    RelayStarter.START_REASON_FOREGROUND_MICROPHONE,
+                    foregroundMicrophoneAcquisition = true,
+                )
         }
     }
 

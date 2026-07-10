@@ -26,6 +26,7 @@ object Constants {
     const val EXTRA_TOKEN = "token"
     const val EXTRA_START_REASON = "start_reason"
     const val EXTRA_WAKE_NOTIFICATION_ID = "wake_notification_id"
+    const val EXTRA_FOREGROUND_MICROPHONE_ACQUISITION = "foreground_microphone_acquisition"
     const val EXTRA_TEST_REPLY = "rokid_relay_test_reply"
     const val EXTRA_TEST_MESSAGE = "rokid_relay_test_message"
     const val EXTRA_TEST_LONG = "rokid_relay_test_long"

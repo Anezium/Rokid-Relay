@@ -36,7 +36,11 @@ object RelayStarter {
         RelayBridge.setStatus("relay armed: wake on notification/reply")
     }
 
-    fun armAndPrepare(context: Context, reason: String = START_REASON_MANUAL): Boolean {
+    fun armAndPrepare(
+        context: Context,
+        reason: String = START_REASON_MANUAL,
+        foregroundMicrophoneAcquisition: Boolean = false,
+    ): Boolean {
         val appContext = context.applicationContext
         setRelayEnabled(appContext, true)
         BleWakeServer.ensureStarted(appContext)
@@ -45,7 +49,13 @@ object RelayStarter {
             RelayBridge.setStatus("relay armed: missing auth token")
             return false
         }
-        return start(appContext, token, reason, persistEnabled = false)
+        return start(
+            appContext,
+            token,
+            reason,
+            persistEnabled = false,
+            foregroundMicrophoneAcquisition = foregroundMicrophoneAcquisition,
+        )
     }
 
     fun wakeForNotification(context: Context): Boolean {
@@ -98,10 +108,21 @@ object RelayStarter {
         }
     }
 
-    fun start(context: Context, token: String, reason: String): Boolean =
-        start(context, token, reason, persistEnabled = true)
+    fun start(
+        context: Context,
+        token: String,
+        reason: String,
+        foregroundMicrophoneAcquisition: Boolean = false,
+    ): Boolean =
+        start(
+            context,
+            token,
+            reason,
+            persistEnabled = true,
+            foregroundMicrophoneAcquisition = foregroundMicrophoneAcquisition,
+        )
 
-    fun relaunch(context: Context): Boolean {
+    fun relaunch(context: Context, foregroundMicrophoneAcquisition: Boolean = false): Boolean {
         val appContext = context.applicationContext
         setRelayEnabled(appContext, true)
         val token = authToken(appContext)
@@ -113,6 +134,10 @@ object RelayStarter {
             .setAction(Constants.ACTION_RELAUNCH)
             .putExtra(Constants.EXTRA_TOKEN, token)
             .putExtra(Constants.EXTRA_START_REASON, START_REASON_RELAUNCH)
+            .putExtra(
+                Constants.EXTRA_FOREGROUND_MICROPHONE_ACQUISITION,
+                foregroundMicrophoneAcquisition,
+            )
         return runCatching {
             BleWakeServer.ensureStarted(appContext)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -129,12 +154,22 @@ object RelayStarter {
         }
     }
 
-    private fun start(context: Context, token: String, reason: String, persistEnabled: Boolean): Boolean {
+    private fun start(
+        context: Context,
+        token: String,
+        reason: String,
+        persistEnabled: Boolean,
+        foregroundMicrophoneAcquisition: Boolean = false,
+    ): Boolean {
         val appContext = context.applicationContext
         val intent = Intent(appContext, RelayService::class.java)
             .setAction(Constants.ACTION_START)
             .putExtra(Constants.EXTRA_TOKEN, token)
             .putExtra(Constants.EXTRA_START_REASON, reason)
+            .putExtra(
+                Constants.EXTRA_FOREGROUND_MICROPHONE_ACQUISITION,
+                foregroundMicrophoneAcquisition,
+            )
         return runCatching {
             if (persistEnabled) setRelayEnabled(appContext, true)
             if (isRelayEnabled(appContext)) BleWakeServer.ensureStarted(appContext)
@@ -155,6 +190,9 @@ object RelayStarter {
     fun stop(context: Context) {
         val appContext = context.applicationContext
         setRelayEnabled(appContext, false)
+        if (RelayService.running) {
+            RelayService.setPersistentMicrophoneForegroundRequested(false)
+        }
         BleWakeServer.stop()
         runCatching {
             appContext.startService(
@@ -185,6 +223,7 @@ object RelayStarter {
     }
 
     const val START_REASON_MANUAL = "manual_start"
+    const val START_REASON_FOREGROUND_MICROPHONE = "foreground_microphone_arm"
     const val START_REASON_RELAUNCH = "manual_relaunch"
     const val START_REASON_SELF_ARM = "self_arm_recovery"
     const val START_REASON_NOTIFICATION = "notification_posted"

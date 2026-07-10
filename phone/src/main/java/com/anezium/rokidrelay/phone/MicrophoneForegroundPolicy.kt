@@ -1,5 +1,57 @@
 package com.anezium.rokidrelay.phone
 
+internal const val MICROPHONE_FOREGROUND_ARM_HINT =
+    "Open Rokid Relay once to enable glasses voice replies"
+
+internal fun isPersistentMicrophoneForegroundEligible(
+    relayEnabled: Boolean,
+    selectedEngine: SpeechToTextEngine,
+    recordAudioGranted: Boolean,
+): Boolean =
+    relayEnabled &&
+        selectedEngine == SpeechToTextEngine.ANDROID_CXR &&
+        recordAudioGranted
+
+internal fun shouldPersistArmedService(
+    relayEnabled: Boolean,
+    selectedEngine: SpeechToTextEngine,
+    recordAudioGranted: Boolean,
+    microphoneForegroundActive: Boolean,
+): Boolean =
+    isPersistentMicrophoneForegroundEligible(
+        relayEnabled = relayEnabled,
+        selectedEngine = selectedEngine,
+        recordAudioGranted = recordAudioGranted,
+    ) && microphoneForegroundActive
+
+internal fun microphoneForegroundArmHint(
+    relayEnabled: Boolean,
+    selectedEngine: SpeechToTextEngine,
+    recordAudioGranted: Boolean,
+    microphoneForegroundActive: Boolean,
+): String? =
+    MICROPHONE_FOREGROUND_ARM_HINT.takeIf {
+        isPersistentMicrophoneForegroundEligible(
+            relayEnabled = relayEnabled,
+            selectedEngine = selectedEngine,
+            recordAudioGranted = recordAudioGranted,
+        ) && !microphoneForegroundActive
+    }
+
+internal fun relayForegroundNotificationText(
+    defaultText: String,
+    relayEnabled: Boolean,
+    selectedEngine: SpeechToTextEngine,
+    recordAudioGranted: Boolean,
+    microphoneForegroundActive: Boolean,
+): String =
+    microphoneForegroundArmHint(
+        relayEnabled = relayEnabled,
+        selectedEngine = selectedEngine,
+        recordAudioGranted = recordAudioGranted,
+        microphoneForegroundActive = microphoneForegroundActive,
+    ) ?: defaultText
+
 internal fun shouldPromoteMicrophoneForegroundOnPresence(
     relayEnabled: Boolean,
     relayServiceRunning: Boolean,

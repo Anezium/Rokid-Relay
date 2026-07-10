@@ -23,8 +23,12 @@ class RelayService : Service() {
         handler.postDelayed({
             RelayBridge.setStatus("relay sleeping until next notification")
             RelayBridge.stop()
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+            if (shouldKeepServiceArmedAfterIdle()) {
+                updateForegroundNotification()
+            } else {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
         }, SLEEP_EVENT_GRACE_MS)
     }
 
@@ -35,20 +39,33 @@ class RelayService : Service() {
         microphoneForegroundActive = false
         microphoneForegroundRequested = false
         microphoneForegroundHeldForAwakeWindow = false
+        persistentMicrophoneForegroundRequested = false
         lastMicrophoneForegroundError = ""
         createChannel()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val startReason = intent?.getStringExtra(Constants.EXTRA_START_REASON).orEmpty()
+        val selectedEngine = SpeechToTextSettingsStore(this).selectedEngine()
+        val recordAudioGranted =
+            checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        val foregroundMicrophoneAcquisitionRequested =
+            intent?.getBooleanExtra(Constants.EXTRA_FOREGROUND_MICROPHONE_ACQUISITION, false) == true &&
+                isPersistentMicrophoneForegroundEligible(
+                    relayEnabled = RelayStarter.isRelayEnabled(this),
+                    selectedEngine = selectedEngine,
+                    recordAudioGranted = recordAudioGranted,
+                )
         val initialWakeMicrophoneRequested =
             intent?.action == Constants.ACTION_START &&
                 shouldRequestMicrophoneForegroundOnInitialWake(
                     startReason = startReason,
-                    selectedEngine = SpeechToTextSettingsStore(this).selectedEngine(),
-                    recordAudioGranted =
-                        checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED,
+                    selectedEngine = selectedEngine,
+                    recordAudioGranted = recordAudioGranted,
                 )
+        if (foregroundMicrophoneAcquisitionRequested) {
+            persistentMicrophoneForegroundRequested = true
+        }
         if (initialWakeMicrophoneRequested) {
             // This must be set before the first promotion made for the wake start. The system's
             // temporary background-start allowlist may also satisfy microphone while-in-use
@@ -73,6 +90,7 @@ class RelayService : Service() {
                 BleWakeServer.stop()
                 microphoneForegroundRequested = false
                 microphoneForegroundHeldForAwakeWindow = false
+                persistentMicrophoneForegroundRequested = false
                 cancelIdleStop()
                 RelayBridge.disableSelfArmBestEffort(this) {
                     RelayBridge.stop()
@@ -141,6 +159,7 @@ class RelayService : Service() {
         microphoneForegroundActive = false
         microphoneForegroundRequested = false
         microphoneForegroundHeldForAwakeWindow = false
+        persistentMicrophoneForegroundRequested = false
         lastMicrophoneForegroundError = "Relay service stopped"
         if (instance === this) instance = null
         super.onDestroy()
@@ -149,9 +168,12 @@ class RelayService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun startForegroundCompat() {
-        val notification = buildNotification()
         val requestMicrophone = shouldRequestMicrophoneForeground()
-        if (requestMicrophone && microphoneForegroundActive) return
+        if (requestMicrophone && microphoneForegroundActive) {
+            updateForegroundNotification()
+            return
+        }
+        val notification = buildNotification()
         runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val microphoneType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && requestMicrophone) {
@@ -191,14 +213,24 @@ class RelayService : Service() {
                 }
             }
         }
+        updateForegroundNotification()
     }
 
     private fun shouldRequestMicrophoneForeground(): Boolean {
-        if (microphoneForegroundHeldForAwakeWindow && microphoneForegroundActive) return true
-        if (!microphoneForegroundRequested && !microphoneForegroundHeldForAwakeWindow) return false
         val selected = SpeechToTextSettingsStore(this).selectedEngine()
-        return selected.requiresMicrophonePermission &&
-            checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        val eligible = isPersistentMicrophoneForegroundEligible(
+            relayEnabled = RelayStarter.isRelayEnabled(this),
+            selectedEngine = selected,
+            recordAudioGranted =
+                checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED,
+        )
+        return eligible &&
+            (
+                persistentMicrophoneForegroundRequested ||
+                    microphoneForegroundRequested ||
+                    microphoneForegroundHeldForAwakeWindow ||
+                    microphoneForegroundActive
+                )
     }
 
     private fun buildNotification(): Notification {
@@ -217,12 +249,41 @@ class RelayService : Service() {
         return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_relay)
             .setContentTitle(getString(R.string.relay_notification_title))
-            .setContentText(getString(R.string.relay_notification_text))
+            .setContentText(
+                relayForegroundNotificationText(
+                    defaultText = getString(R.string.relay_notification_text),
+                    relayEnabled = RelayStarter.isRelayEnabled(this),
+                    selectedEngine = SpeechToTextSettingsStore(this).selectedEngine(),
+                    recordAudioGranted =
+                        checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED,
+                    microphoneForegroundActive = microphoneForegroundActive,
+                ),
+            )
             .setContentIntent(openIntent)
             .setOngoing(true)
             .addAction(R.drawable.ic_stat_relay, "Stop", stopIntent)
             .build()
     }
+
+    private fun updateForegroundNotification() {
+        runCatching {
+            getSystemService(NotificationManager::class.java).notify(
+                NOTIFICATION_ID,
+                buildNotification(),
+            )
+        }.onFailure {
+            Log.w(TAG, "foreground notification update failed: ${it.message}")
+        }
+    }
+
+    private fun shouldKeepServiceArmedAfterIdle(): Boolean =
+        shouldPersistArmedService(
+            relayEnabled = RelayStarter.isRelayEnabled(this),
+            selectedEngine = SpeechToTextSettingsStore(this).selectedEngine(),
+            recordAudioGranted =
+                checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED,
+            microphoneForegroundActive = microphoneForegroundActive,
+        )
 
     private fun createChannel() {
         val channel = NotificationChannel(
@@ -255,6 +316,7 @@ class RelayService : Service() {
         @Volatile private var instance: RelayService? = null
         @Volatile private var microphoneForegroundRequested: Boolean = false
         @Volatile private var microphoneForegroundHeldForAwakeWindow: Boolean = false
+        @Volatile private var persistentMicrophoneForegroundRequested: Boolean = false
 
         private const val TAG = "RelayService"
         private const val CHANNEL_ID = "rokid_relay"
@@ -264,10 +326,17 @@ class RelayService : Service() {
 
         fun setMicrophoneForegroundRequested(requested: Boolean): Boolean {
             microphoneForegroundRequested = requested
-            if (!requested && microphoneForegroundHeldForAwakeWindow) {
-                return microphoneForegroundActive
-            }
             return refreshForeground()
+        }
+
+        fun setPersistentMicrophoneForegroundRequested(requested: Boolean): Boolean {
+            persistentMicrophoneForegroundRequested = requested
+            if (!requested) {
+                microphoneForegroundHeldForAwakeWindow = false
+            }
+            val active = refreshForeground()
+            if (!requested) instance?.scheduleIdleStop()
+            return active
         }
 
         fun promoteMicrophoneForegroundForAwakeWindow(): Boolean {

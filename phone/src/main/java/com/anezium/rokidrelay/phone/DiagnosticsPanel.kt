@@ -1,6 +1,8 @@
 package com.anezium.rokidrelay.phone
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -134,6 +136,13 @@ class DiagnosticsPanel(
                     error = RelayService.lastMicrophoneForegroundError,
                 ),
             )
+            microphoneForegroundArmHint(
+                relayEnabled = RelayStarter.isRelayEnabled(context),
+                selectedEngine = SpeechToTextSettingsStore(context).selectedEngine(),
+                recordAudioGranted =
+                    context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED,
+                microphoneForegroundActive = RelayService.microphoneForegroundActive,
+            )?.let { appendLine(it) }
             appendLine("CXR audio: ${displayBytes(snapshot.cxrAudioBytes)} avg=${snapshot.vadAverageAbs} peak=${snapshot.vadPeakAbs} speech=${snapshot.vadSpeechDetected}")
             if (snapshot.lastVoiceError.isNotBlank()) appendLine("Voice error: ${snapshot.lastVoiceError}")
             appendLine("Sent: ${displayMessage(snapshot.lastOutgoingReply)}")

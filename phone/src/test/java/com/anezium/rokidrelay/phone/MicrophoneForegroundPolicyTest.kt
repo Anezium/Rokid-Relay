@@ -7,6 +7,80 @@ import org.junit.Test
 
 class MicrophoneForegroundPolicyTest {
     @Test
+    fun persistentArmedServiceRequiresEveryGate() {
+        val booleans = listOf(false, true)
+        val engines = listOf(
+            SpeechToTextEngine.OPENAI_GPT_REALTIME_WHISPER,
+            SpeechToTextEngine.ANDROID_CXR,
+        )
+
+        booleans.forEach { relayEnabled ->
+            engines.forEach { selectedEngine ->
+                booleans.forEach { recordAudioGranted ->
+                    booleans.forEach { microphoneForegroundActive ->
+                        val expected = relayEnabled &&
+                            selectedEngine == SpeechToTextEngine.ANDROID_CXR &&
+                            recordAudioGranted &&
+                            microphoneForegroundActive
+                        assertEquals(
+                            "relay=$relayEnabled engine=$selectedEngine " +
+                                "recordAudio=$recordAudioGranted micFgs=$microphoneForegroundActive",
+                            expected,
+                            shouldPersistArmedService(
+                                relayEnabled = relayEnabled,
+                                selectedEngine = selectedEngine,
+                                recordAudioGranted = recordAudioGranted,
+                                microphoneForegroundActive = microphoneForegroundActive,
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun foregroundNotificationSelectsArmHintForEveryGateCombination() {
+        val normalText = "Forwarding replyable notifications to the glasses"
+        val booleans = listOf(false, true)
+        val engines = listOf(
+            SpeechToTextEngine.OPENAI_GPT_REALTIME_WHISPER,
+            SpeechToTextEngine.ANDROID_CXR,
+        )
+
+        booleans.forEach { relayEnabled ->
+            engines.forEach { selectedEngine ->
+                booleans.forEach { recordAudioGranted ->
+                    booleans.forEach { microphoneForegroundActive ->
+                        val expected = if (
+                            relayEnabled &&
+                            selectedEngine == SpeechToTextEngine.ANDROID_CXR &&
+                            recordAudioGranted &&
+                            !microphoneForegroundActive
+                        ) {
+                            "Open Rokid Relay once to enable glasses voice replies"
+                        } else {
+                            normalText
+                        }
+                        assertEquals(
+                            "relay=$relayEnabled engine=$selectedEngine " +
+                                "recordAudio=$recordAudioGranted micFgs=$microphoneForegroundActive",
+                            expected,
+                            relayForegroundNotificationText(
+                                defaultText = normalText,
+                                relayEnabled = relayEnabled,
+                                selectedEngine = selectedEngine,
+                                recordAudioGranted = recordAudioGranted,
+                                microphoneForegroundActive = microphoneForegroundActive,
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
     fun androidCxrPresencePromotesForRunningArmedRelay() {
         assertTrue(
             shouldPromoteMicrophoneForegroundOnPresence(
