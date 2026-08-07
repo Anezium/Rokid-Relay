@@ -1,3 +1,6 @@
+> [!WARNING]
+> **Deprecated — superseded by the [Relay plugin](https://github.com/Anezium/Rokid-Nexus/tree/main/plugins/relay) for [Rokid Nexus](https://github.com/Anezium/Rokid-Nexus).** The plugin relays your notifications and sends spoken replies over the Nexus bus — no separate CXR session, no API keys for speech (the hub's speech capabilities do the work) — and installs in one tap from the Nexus Store. This app is no longer maintained and will not receive updates.
+
 <p align="center">
   <img src="Rokid_Relay_logo.png" alt="Rokid Relay logo" width="230" />
 </p>
